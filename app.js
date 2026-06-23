@@ -224,8 +224,9 @@ $('btnTpsApi').addEventListener('click', async ()=>{
       const reg = v===true || String(v).toLowerCase()==='true' || String(v).toLowerCase()==='yes' || v===1 || String(v)==='1';
       if(reg){ apiHits.add(r._e164); r._tps=true; r._suppress='API'; }
     }catch(_){ /* leave as-is on error */ }
-    if(++done%10===0){ $('tpsStatus').textContent=`API checking ${done}/${targets.length}…`; renderTable(); }
+    if(++done%10===0){ $('tpsApiStatus').textContent=`API checking ${done}/${targets.length}…`; renderTable(); }
   }
+  $('tpsApiStatus').textContent=`Done — ${done.toLocaleString()} checked against TPS API.`;
   suppressionStatus(); updateStats(); renderTable(); $('btnTpsApi').disabled=false;
 });
 
@@ -257,9 +258,12 @@ document.getElementById('stepper').addEventListener('click', e=>{
   if(n===1) showStep(1);
   else if(n===2 && state.rawRecords.length) showStep(2);
   else if(n===3 && state.records.length) showStep(3);
+  else if(n===4 && state.records.length){ updateScrubTargetInfo(); showStep(4); }
 });
 $('btnToValidate').addEventListener('click', ()=>{ if(state.rawRecords.length){ $('step2Info').textContent=`${state.rawRecords.length.toLocaleString()} rows from ${state.files.length} file(s) ready.`; showStep(2); }});
 $('btnBack').addEventListener('click', ()=>showStep(1));
+$('btnToScrub').addEventListener('click', ()=>{ if(state.records.length){ updateScrubTargetInfo(); showStep(4); }});
+$('btnScrubBack').addEventListener('click', ()=>showStep(3));
 
 // ── File ingestion → exact-file preview (Step 1) ──────────────────────────
 $('folderInput').addEventListener('change', e => addFiles(e.target.files));
@@ -302,8 +306,15 @@ async function addFiles(files){
   $('rawInfo').textContent = 'Reading files…';
   // Parse for the exact-file preview (no validation yet)
   for(const f of incoming){
-    try{ const rows = await parseFile(f); rows.forEach(r=>r._file=f.name); state.rawRecords.push(...rows); }
-    catch(err){ console.warn('parse fail', f.name, err); }
+    $('rawInfo').textContent = `Reading ${f.name}…`;
+    await tick();                                   // let the UI paint before the heavy parse
+    try{
+      const rows = await parseFile(f);
+      for(let i=0;i<rows.length;i++){ rows[i]._file=f.name; state.rawRecords.push(rows[i]); }  // element-wise (spread breaks on huge arrays)
+      $('rawInfo').textContent = `Read ${state.rawRecords.length.toLocaleString()} rows so far…`;
+    }
+    catch(err){ console.warn('parse fail', f.name, err); $('rawInfo').textContent = `Could not read ${f.name}: ${err.message||err}`; }
+    await tick();
   }
   renderRawPreview();
   $('btnToValidate').disabled = state.rawRecords.length === 0;
@@ -376,7 +387,7 @@ async function runValidation(){
   $('progressWrap').style.display='none';
   $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
   $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false;
-  $('btnLiveCheck').disabled = !$('liveApiUrl').value.trim();
+  $('btnToScrub').disabled=false; updateScrubTargetInfo();
   $('btnTpsApi').disabled = !$('tpsApiUrl').value.trim();
   $('btnProcess').disabled = false;
   state.tab='landline'; setActiveTab('landline');
@@ -400,12 +411,37 @@ function parseExcel(f){
   return new Promise((res,rej)=>{
     const rd=new FileReader();
     rd.onload=e=>{try{
-      const wb=XLSX.read(e.target.result,{type:'array'});const rows=[];
-      wb.SheetNames.forEach(n=>rows.push(...XLSX.utils.sheet_to_json(wb.Sheets[n],{defval:''})));
+      // Lean read: we only want cell values, not styles/number-formats/formulas.
+      const wb=XLSX.read(e.target.result,{type:'array', cellStyles:false, cellNF:false, cellFormula:false, cellHTML:false, cellDates:false});
+      const rows=[];
+      wb.SheetNames.forEach(n=>{
+        const ws=wb.Sheets[n];
+        trimSheetRange(ws);                                    // guard against inflated ranges
+        const part=XLSX.utils.sheet_to_json(ws,{defval:'', blankrows:false});
+        for(let i=0;i<part.length;i++) rows.push(part[i]);     // element-wise (spread breaks on huge arrays)
+      });
       res(rows);
     }catch(err){rej(err);}};
     rd.onerror=rej; rd.readAsArrayBuffer(f);
   });
+}
+
+// Clamp a sheet's declared range to the cells that actually hold data. Excel exports often
+// declare an inflated dimension (e.g. A1:Z1048576); without this, sheet_to_json would build
+// ~1,000,000 empty rows and freeze the tab for minutes on even a small real dataset.
+function trimSheetRange(ws){
+  if(!ws || !ws['!ref']) return;
+  const dec=XLSX.utils.decode_range(ws['!ref']);
+  if((dec.e.r - dec.s.r) < 20000) return;          // range already sane — leave it
+  let maxR=0, maxC=0, seen=false;
+  for(const k in ws){
+    if(k.charCodeAt(0)===33) continue;             // skip '!ref', '!cols', '!merges', …
+    const cell=XLSX.utils.decode_cell(k);
+    seen=true;
+    if(cell.r>maxR) maxR=cell.r;
+    if(cell.c>maxC) maxC=cell.c;
+  }
+  ws['!ref']= seen ? XLSX.utils.encode_range({s:{r:0,c:0}, e:{r:maxR,c:maxC}}) : 'A1';
 }
 
 // ── Column detection ─────────────────────────────────────────────────────
@@ -659,52 +695,125 @@ let st; $('searchInput').addEventListener('input',e=>{clearTimeout(st);st=setTim
 $('pgPrev').addEventListener('click',()=>{state.page--;renderTable();});
 $('pgNext').addEventListener('click',()=>{state.page++;renderTable();});
 
-// ── Live check (Veriphone free API) ──────────────────────────────────────
-// Live-status API presets: endpoint template + the JSON field that means "active".
-const LIVE_PRESETS = {
-  veriphone: { url:'https://api.veriphone.io/v2/verify?phone={number}&key={key}', field:'phone_valid' },
-  abstract:  { url:'https://phonevalidation.abstractapi.com/v1/?api_key={key}&phone={number}', field:'valid' },
-  numlookup: { url:'https://api.numlookupapi.com/v1/validate/{number}?apikey={key}', field:'valid' },
-  ipqs:      { url:'https://ipqualityscore.com/api/json/phone/{key}/{number}', field:'active' },
-};
-$('livePreset').addEventListener('change', e=>{
-  const p=LIVE_PRESETS[e.target.value];
-  if(p){ $('liveApiUrl').value=p.url; $('liveApiField').value=p.field; }
-  $('btnLiveCheck').disabled = !$('liveApiUrl').value.trim() || !state.records.length;
-});
-$('liveApiUrl').addEventListener('input', ()=>{
-  $('btnLiveCheck').disabled = !$('liveApiUrl').value.trim() || !state.records.length;
-});
-$('btnLiveCheck').addEventListener('click', liveCheck);
-
+// ── Online scrubbing: bot worker pool + free-API providers (Step 4) ────────
 // Read a possibly-nested field (dot path) from a response object.
 const dig = (o,path) => path.split('.').reduce((x,k)=> x==null?x:x[k], o);
+const sleep = ms => new Promise(r=>setTimeout(r, ms));
+const cap = s => s.charAt(0).toUpperCase()+s.slice(1);
 
-async function liveCheck(){
-  const url=$('liveApiUrl').value.trim(), key=$('apiKey').value.trim(), field=($('liveApiField').value.trim()||'valid');
-  if(!url){ alert('Pick a preset or enter an endpoint with {number} and {key} placeholders.'); return; }
-  const targets = state.records.filter(r=>(r._status==='landline'||r._status==='mobile') && !r._live);
-  if(!targets.length){ alert('No un-checked callable numbers.'); return; }
-  if(!confirm(`Live-check ${targets.length.toLocaleString()} numbers via your API? (uses your quota)`)) return;
+// Free providers: endpoint template + the JSON field that signals a valid/active line.
+const PROVIDERS = {
+  veriphone: { name:'Veriphone',    url:'https://api.veriphone.io/v2/verify?phone={number}&key={key}',          field:'phone_valid' },
+  numlookup: { name:'NumLookupAPI', url:'https://api.numlookupapi.com/v1/validate/{number}?apikey={key}',       field:'valid' },
+  abstract:  { name:'AbstractAPI',  url:'https://phonevalidation.abstractapi.com/v1/?api_key={key}&phone={number}', field:'valid' },
+};
 
-  const lp = $('liveProgress');
-  $('btnLiveCheck').disabled = true;
-  let done=0;
-  for(const r of targets){
-    const u=url.replace('{number}',encodeURIComponent(r._e164)).replace('{key}',encodeURIComponent(key));
+const scrub = { running:false, queue:[], idx:0, call:0, providers:[], throttle:1100, counters:null };
+
+// Active provider list, in round-robin order, from the enabled rows.
+function buildScrubProviders(){
+  const list=[];
+  for(const id of ['veriphone','numlookup','abstract']){
+    if($('pv'+cap(id)).checked){
+      const key=$('key'+cap(id)).value.trim();
+      if(key){ const p=PROVIDERS[id]; list.push({name:p.name, url:p.url, field:p.field, key}); }
+    }
+  }
+  if($('pvCustom').checked){
+    const url=$('customUrl').value.trim();
+    if(url) list.push({name:'Custom', url, field:($('customField').value.trim()||'valid'), key:$('customKey').value.trim()});
+  }
+  return list;
+}
+
+// Callable numbers to scrub (optionally skipping ones already checked).
+function scrubTargets(){
+  const skip=$('scrubSkip').checked;
+  return state.records.filter(r=>(r._status==='landline'||r._status==='mobile') && !(skip && r._live));
+}
+function updateScrubTargetInfo(){
+  if(!$('scrubTargetInfo')) return;
+  const n=scrubTargets().length;
+  $('scrubTargetInfo').textContent = state.records.length ? `${n.toLocaleString()} callable number(s) queued.` : 'Run validation first.';
+  $('btnScrubStart').disabled = scrub.running || !state.records.length;
+}
+
+function renderBotBoard(n){
+  $('botBoard').innerHTML = Array.from({length:n},(_,i)=>
+    `<div class="bot-row" id="bot${i}"><span class="bot-dot"></span><span class="bot-id">Bot ${i+1}</span><span class="bot-state" id="botState${i}">idle</span></div>`
+  ).join('');
+}
+function setBot(id, busy, txt){
+  const row=$('bot'+id); if(!row) return;
+  row.classList.toggle('busy', busy);
+  const s=$('botState'+id); if(s) s.textContent = txt;
+}
+function updateScrubStats(){
+  const c=scrub.counters; if(!c) return;
+  $('scrubDone').textContent    = c.done.toLocaleString();
+  $('scrubTotal').textContent   = c.total.toLocaleString();
+  $('scrubActive').textContent  = c.active.toLocaleString();
+  $('scrubDead').textContent    = c.dead.toLocaleString();
+  $('scrubUnknown').textContent = c.unknown.toLocaleString();
+  $('scrubProgress').textContent = scrub.running
+    ? `Scrubbing ${c.done}/${c.total}…`
+    : (c.done ? `Finished — ${c.done}/${c.total} checked (✅ ${c.active} · ❌ ${c.dead} · ⚠️ ${c.unknown}).` : '');
+}
+
+// One bot: pulls the next number, picks the next provider (round-robin), checks it.
+async function botWorker(botId){
+  while(scrub.running){
+    const i = scrub.idx++;
+    if(i >= scrub.queue.length) break;
+    const r = scrub.queue[i];
+    const prov = scrub.providers[scrub.call++ % scrub.providers.length];
+    setBot(botId, true, `${prov.name} · ${r._e164}`);
+    const u = prov.url.replace('{number}', encodeURIComponent(r._e164))
+                      .replace('{key}',    encodeURIComponent(prov.key||''));
     try{
       const d = await (await fetch(u)).json();
-      const v = dig(d, field);
-      const active = v===true || String(v).toLowerCase()==='true' || String(v).toLowerCase()==='active' || v===1 || String(v)==='1';
+      const v = dig(d, prov.field);
+      const active = v===true || v===1 || ['true','active','yes','1'].includes(String(v).toLowerCase());
       r._live = active ? 'active' : 'dead';
-      if(d.carrier && !r._carrier) r._carrier = typeof d.carrier==='string'?d.carrier:(d.carrier.name||'');
-    }catch(_){ r._live='unknown'; }
-    if(++done%10===0){ lp.textContent=`Checking ${done}/${targets.length}…`; renderTable(); }
+      r._liveBy = prov.name;
+      if(d && d.carrier && !r._carrier) r._carrier = typeof d.carrier==='string' ? d.carrier : (d.carrier.name||'');
+      scrub.counters[active ? 'active' : 'dead']++;
+    }catch(_){ r._live='unknown'; scrub.counters.unknown++; }
+    scrub.counters.done++;
+    if(scrub.counters.done % 5 === 0){ updateScrubStats(); renderTable(); }
+    if(scrub.throttle) await sleep(scrub.throttle);
   }
-  lp.textContent = `Done — ${done.toLocaleString()} checked.`;
-  $('btnLiveCheck').disabled=false;
-  renderTable();
+  setBot(botId, false, 'idle');
 }
+
+async function startScrub(){
+  if(scrub.running) return;
+  const providers = buildScrubProviders();
+  if(!providers.length) return alert('Enable at least one provider and enter its API key (or a custom endpoint).');
+  const targets = scrubTargets();
+  if(!targets.length) return alert('No callable numbers to scrub. Run validation first.');
+  if(!confirm(`Scrub ${targets.length.toLocaleString()} numbers across ${providers.length} provider(s)? This uses your free quota.`)) return;
+
+  const n = Math.max(1, Math.min(8, +$('botCount').value || 3));
+  scrub.throttle = Math.max(0, +$('botThrottle').value || 0);
+  Object.assign(scrub, { running:true, queue:targets, idx:0, call:0, providers,
+    counters:{ done:0, active:0, dead:0, unknown:0, total:targets.length } });
+
+  renderBotBoard(n);
+  $('btnScrubStart').disabled=true; $('btnScrubStop').disabled=false;
+  updateScrubStats();
+  await Promise.all(Array.from({length:n}, (_,i)=>botWorker(i)));
+
+  scrub.running=false;
+  $('btnScrubStart').disabled=false; $('btnScrubStop').disabled=true;
+  updateScrubStats(); renderTable();
+}
+function stopScrub(){ if(scrub.running){ scrub.running=false; $('scrubProgress').textContent='Stopping…'; } }
+
+$('btnScrubStart').addEventListener('click', startScrub);
+$('btnScrubStop').addEventListener('click', stopScrub);
+['pvVeriphone','pvNumlookup','pvAbstract','pvCustom','botCount','botThrottle','scrubSkip']
+  .forEach(id=>{ const el=$(id); if(el) el.addEventListener('change', updateScrubTargetInfo); });
 
 // ── Export ───────────────────────────────────────────────────────────────
 // TPS-safe: valid landlines + mobiles, excluding TPS-registered numbers
@@ -803,9 +912,13 @@ $('btnReset').addEventListener('click',()=>{
   $('dataTable').style.display='none'; $('emptyState').style.display='';
   $('pagination').style.display='none';
   $('btnToValidate').disabled=true;
-  $('btnExportSafe').disabled=true; $('btnExportLandline').disabled=true; $('btnExportAll').disabled=true; $('btnLiveCheck').disabled=true;
+  $('btnExportSafe').disabled=true; $('btnExportLandline').disabled=true; $('btnExportAll').disabled=true; $('btnToScrub').disabled=true;
   $('btnExportFresh').disabled=true; $('btnMasterAdd').disabled=true;
-  $('searchInput').value=''; $('liveProgress').textContent='';
+  $('searchInput').value='';
+  // Reset online-scrub state
+  scrub.running=false; scrub.counters=null;
+  $('botBoard').innerHTML=''; $('scrubProgress').textContent='';
+  $('btnScrubStart').disabled=true; $('btnScrubStop').disabled=true;
   showStep(1);
 });
 

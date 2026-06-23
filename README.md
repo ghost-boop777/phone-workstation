@@ -57,9 +57,27 @@ This is the workflow for vetting a lead list **before you buy it**:
 The master list persists across sessions and survives **Reset** (Reset only clears the current
 upload, never your owned numbers). Use **🗑 Clear** on the Master-list panel to wipe it.
 
-## Active Number Checking
+## Online Scrubbing — bot workers + free APIs (Step 4)
 
-The app supports three methods for verifying if numbers are still live:
+Live/active checking is a **separate, deliberate step** from the offline pipeline because it
+uses the internet and your API quota. It lives on its own wizard step (**4 · Scrub**) and never
+runs automatically.
+
+**How it works**
+- **Free API providers** — enable any of Veriphone (1,000/mo), NumLookupAPI (100/mo),
+  AbstractAPI (100/mo), or a custom endpoint. Enter each provider's key.
+- **Round-robin** — bot workers spread calls across *all enabled* providers, so you can
+  **combine free quotas** (e.g. 1,000 + 100 + 100 = 1,200 checks/mo) and go faster.
+- **Bot worker pool** — pick 1–8 concurrent workers and a per-worker throttle (ms). Effective
+  rate ≈ workers ÷ throttle; keep it near providers' ~1 req/sec free limits. A live board shows
+  each bot's current number, with running ✅ active / ❌ dead / ⚠️ unknown tallies.
+- **Stop** any time — workers finish their in-flight call and halt; results so far are kept.
+- Results land in the `_live` column and stream into the Step 3 table as they complete.
+
+Free APIs confirm validity/reachability signals; for guaranteed line-status use a paid HLR
+lookup (Twilio Lookup / Vonage Number Insight) via the **custom endpoint** field.
+
+### Other active-checking options
 
 | Method | How |
 |---|---|
