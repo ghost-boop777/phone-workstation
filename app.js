@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-24a';
-console.log('Phone Workstation build', BUILD, '— auth gate + large-file fix + online scrubbing');
+const BUILD = '2026-06-24b';
+console.log('Phone Workstation build', BUILD, '— auth + savings report + scrub cache/quota');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -390,7 +390,7 @@ async function runValidation(){
   $('progressWrap').style.display='none';
   $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
   $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false;
-  $('btnToScrub').disabled=false; updateScrubTargetInfo();
+  $('btnToScrub').disabled=false; $('btnReport').disabled=false; updateScrubTargetInfo();
   $('btnTpsApi').disabled = !$('tpsApiUrl').value.trim();
   $('btnProcess').disabled = false;
   state.tab='landline'; setActiveTab('landline');
@@ -711,6 +711,48 @@ const PROVIDERS = {
   abstract:  { name:'AbstractAPI',  url:'https://phonevalidation.abstractapi.com/v1/?api_key={key}&phone={number}', field:'valid' },
 };
 
+// ── Scrub cache (persistent, by E.164) ─────────────────────────────────────
+const scrubCacheMap = new Map();
+async function scrubCacheLoad(){
+  try{
+    const db=await openDB();
+    const all=await new Promise((res,rej)=>{const tx=db.transaction(CACHE_STORE,'readonly');const rq=tx.objectStore(CACHE_STORE).getAll();rq.onsuccess=()=>res(rq.result||[]);rq.onerror=()=>rej(rq.error);});
+    scrubCacheMap.clear(); all.forEach(o=>scrubCacheMap.set(o.e,{live:o.live, by:o.by}));
+  }catch(_){}
+}
+function scrubCachePut(e164, live, by){
+  scrubCacheMap.set(e164,{live, by});
+  openDB().then(db=>{ const tx=db.transaction(CACHE_STORE,'readwrite'); tx.objectStore(CACHE_STORE).put({e:e164, live, by, at:Date.now()}); }).catch(()=>{});
+}
+async function scrubCacheClear(){
+  scrubCacheMap.clear();
+  try{ const db=await openDB(); await new Promise((res,rej)=>{const tx=db.transaction(CACHE_STORE,'readwrite');tx.objectStore(CACHE_STORE).clear();tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);}); }catch(_){}
+}
+
+// ── Monthly free-quota meter (per provider, in localStorage) ────────────────
+const PROVIDER_LIMITS = { veriphone:1000, numlookup:100, abstract:100 };
+const monthKey  = () => new Date().toISOString().slice(0,7);                  // YYYY-MM
+const quotaKey  = id => `pwq_${id}_${monthKey()}`;
+const quotaUsed = id => parseInt(localStorage.getItem(quotaKey(id))||'0',10);
+const quotaRemaining = id => { const lim=PROVIDER_LIMITS[id]; return lim==null?Infinity:Math.max(0, lim-quotaUsed(id)); };
+function quotaBump(id){ if(PROVIDER_LIMITS[id]==null) return; localStorage.setItem(quotaKey(id), String(quotaUsed(id)+1)); }
+function renderQuota(){
+  for(const id of ['veriphone','numlookup','abstract']){
+    const el=$('quota'+cap(id)); if(!el) continue;
+    el.textContent = `${quotaUsed(id).toLocaleString()} / ${PROVIDER_LIMITS[id].toLocaleString()} used this month`;
+    el.classList.toggle('maxed', quotaRemaining(id)<=0);
+  }
+}
+// Round-robin to the next provider that still has monthly quota (custom = unlimited).
+function nextProvider(){
+  const n=scrub.providers.length;
+  for(let k=0;k<n;k++){
+    const p=scrub.providers[(scrub.call++) % n];
+    if(quotaRemaining(p.id) > 0) return p;
+  }
+  return null;   // every provider is at its monthly free limit
+}
+
 const scrub = { running:false, queue:[], idx:0, call:0, providers:[], throttle:1100, counters:null };
 
 // Active provider list, in round-robin order, from the enabled rows.
@@ -719,12 +761,12 @@ function buildScrubProviders(){
   for(const id of ['veriphone','numlookup','abstract']){
     if($('pv'+cap(id)).checked){
       const key=$('key'+cap(id)).value.trim();
-      if(key){ const p=PROVIDERS[id]; list.push({name:p.name, url:p.url, field:p.field, key}); }
+      if(key){ const p=PROVIDERS[id]; list.push({id, name:p.name, url:p.url, field:p.field, key}); }
     }
   }
   if($('pvCustom').checked){
     const url=$('customUrl').value.trim();
-    if(url) list.push({name:'Custom', url, field:($('customField').value.trim()||'valid'), key:$('customKey').value.trim()});
+    if(url) list.push({id:'custom', name:'Custom', url, field:($('customField').value.trim()||'valid'), key:$('customKey').value.trim()});
   }
   return list;
 }
@@ -739,6 +781,7 @@ function updateScrubTargetInfo(){
   const n=scrubTargets().length;
   $('scrubTargetInfo').textContent = state.records.length ? `${n.toLocaleString()} callable number(s) queued.` : 'Run validation first.';
   $('btnScrubStart').disabled = scrub.running || !state.records.length;
+  renderQuota();
 }
 
 function renderBotBoard(n){
@@ -758,6 +801,7 @@ function updateScrubStats(){
   $('scrubActive').textContent  = c.active.toLocaleString();
   $('scrubDead').textContent    = c.dead.toLocaleString();
   $('scrubUnknown').textContent = c.unknown.toLocaleString();
+  $('scrubCached').textContent  = (c.cached||0).toLocaleString();
   $('scrubProgress').textContent = scrub.running
     ? `Scrubbing ${c.done}/${c.total}…`
     : (c.done ? `Finished — ${c.done}/${c.total} checked (✅ ${c.active} · ❌ ${c.dead} · ⚠️ ${c.unknown}).` : '');
@@ -765,12 +809,28 @@ function updateScrubStats(){
 
 // One bot: pulls the next number, picks the next provider (round-robin), checks it.
 async function botWorker(botId){
+  const useCache = $('scrubCacheChk').checked;
   while(scrub.running){
     const i = scrub.idx++;
     if(i >= scrub.queue.length) break;
     const r = scrub.queue[i];
-    const prov = scrub.providers[scrub.call++ % scrub.providers.length];
+
+    // 1) cache hit — no API call, no quota, no throttle
+    if(useCache && scrubCacheMap.has(r._e164)){
+      const c = scrubCacheMap.get(r._e164);
+      r._live = c.live; r._liveBy = (c.by||'cache') + ' (cached)';
+      scrub.counters[c.live==='active'?'active':c.live==='dead'?'dead':'unknown']++;
+      scrub.counters.cached++; scrub.counters.done++;
+      if(scrub.counters.done % 5 === 0){ updateScrubStats(); renderTable(); }
+      continue;
+    }
+
+    // 2) pick a provider that still has monthly free quota
+    const prov = nextProvider();
+    if(!prov){ scrub.running=false; $('scrubProgress').textContent='Stopped — every provider hit its monthly free limit.'; break; }
+
     setBot(botId, true, `${prov.name} · ${r._e164}`);
+    quotaBump(prov.id);                                   // count the request (protects the free tier)
     const u = prov.url.replace('{number}', encodeURIComponent(r._e164))
                       .replace('{key}',    encodeURIComponent(prov.key||''));
     try{
@@ -781,9 +841,10 @@ async function botWorker(botId){
       r._liveBy = prov.name;
       if(d && d.carrier && !r._carrier) r._carrier = typeof d.carrier==='string' ? d.carrier : (d.carrier.name||'');
       scrub.counters[active ? 'active' : 'dead']++;
+      scrubCachePut(r._e164, r._live, prov.name);         // remember so we never re-spend quota on it
     }catch(_){ r._live='unknown'; scrub.counters.unknown++; }
     scrub.counters.done++;
-    if(scrub.counters.done % 5 === 0){ updateScrubStats(); renderTable(); }
+    if(scrub.counters.done % 5 === 0){ updateScrubStats(); renderTable(); renderQuota(); }
     if(scrub.throttle) await sleep(scrub.throttle);
   }
   setBot(botId, false, 'idle');
@@ -800,8 +861,9 @@ async function startScrub(){
   const n = Math.max(1, Math.min(8, +$('botCount').value || 3));
   scrub.throttle = Math.max(0, +$('botThrottle').value || 0);
   Object.assign(scrub, { running:true, queue:targets, idx:0, call:0, providers,
-    counters:{ done:0, active:0, dead:0, unknown:0, total:targets.length } });
+    counters:{ done:0, active:0, dead:0, unknown:0, cached:0, total:targets.length } });
 
+  renderQuota();
   renderBotBoard(n);
   $('btnScrubStart').disabled=true; $('btnScrubStop').disabled=false;
   updateScrubStats();
@@ -815,8 +877,15 @@ function stopScrub(){ if(scrub.running){ scrub.running=false; $('scrubProgress')
 
 $('btnScrubStart').addEventListener('click', startScrub);
 $('btnScrubStop').addEventListener('click', stopScrub);
+$('btnClearScrubCache').addEventListener('click', async ()=>{
+  if(!scrubCacheMap.size) return alert('Cache is already empty.');
+  if(!confirm(`Clear ${scrubCacheMap.size.toLocaleString()} cached result(s)? Those numbers will be re-checked (uses quota) next scrub.`)) return;
+  await scrubCacheClear();
+  alert('Scrub cache cleared.');
+});
 ['pvVeriphone','pvNumlookup','pvAbstract','pvCustom','botCount','botThrottle','scrubSkip']
   .forEach(id=>{ const el=$(id); if(el) el.addEventListener('change', updateScrubTargetInfo); });
+scrubCacheLoad(); renderQuota();
 
 // ── Export ───────────────────────────────────────────────────────────────
 // TPS-safe: valid landlines + mobiles, excluding TPS-registered numbers
@@ -906,6 +975,66 @@ function exportSQL(){
 }
 
 // ── Reset ────────────────────────────────────────────────────────────────
+// ── Batch report (savings / ROI) ──────────────────────────────────────────
+function buildReport(){
+  const c = s => state.records.filter(r=>r._status===s).length;
+  const total    = state.records.length;
+  const fresh    = state.records.filter(r=>['landline','mobile','other'].includes(r._status)).length;
+  const owned    = c('owned');
+  const dup      = c('duplicate');
+  const invalid  = c('invalid');
+  const dontPay  = owned + dup + invalid;
+  const active   = state.records.filter(r=>r._live==='active').length;
+  const dead     = state.records.filter(r=>r._live==='dead').length;
+  const scrubbed = state.records.filter(r=>r._live).length;
+  return { total, fresh, owned, dup, invalid, dontPay, active, dead, scrubbed };
+}
+const fmtMoney = n => '£' + n.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2});
+
+function reportSaved(){
+  const r=buildReport(), price=parseFloat($('reportPrice').value)||0;
+  $('reportSaved').textContent = price>0
+    ? `Avoided paying ~${fmtMoney(r.dontPay*price)} (${r.dontPay.toLocaleString()} leads × ${fmtMoney(price)}).`
+    : '';
+}
+function openReport(){
+  if(!state.records.length) return alert('Run validation first.');
+  const r=buildReport();
+  const scrub = r.scrubbed
+    ? `<div class="rep-sub">live scrub</div>
+       <div class="rep-row"><span>✅ Active</span><b>${r.active.toLocaleString()}</b></div>
+       <div class="rep-row"><span>❌ Dead</span><b>${r.dead.toLocaleString()}</b></div>` : '';
+  $('reportBody').innerHTML = `<div class="rep-grid">
+    <div class="rep-row rep-total"><span>Total uploaded</span><b>${r.total.toLocaleString()}</b></div>
+    <div class="rep-row rep-pay"><span>✅ Fresh — worth buying</span><b>${r.fresh.toLocaleString()}</b></div>
+    <div class="rep-sub">don’t pay for these</div>
+    <div class="rep-row"><span>📇 Already owned</span><b>${r.owned.toLocaleString()}</b></div>
+    <div class="rep-row"><span>🔁 In-file duplicates</span><b>${r.dup.toLocaleString()}</b></div>
+    <div class="rep-row"><span>❌ Invalid</span><b>${r.invalid.toLocaleString()}</b></div>
+    ${scrub}
+    <div class="rep-row rep-headline"><span>You only pay for</span><b>${r.fresh.toLocaleString()} of ${r.total.toLocaleString()}</b></div>
+  </div>`;
+  reportSaved();
+  $('reportModal').style.display='flex';
+}
+function exportReport(){
+  const r=buildReport(), price=parseFloat($('reportPrice').value)||0;
+  const rows=[['Metric','Value'],
+    ['Total uploaded', r.total],['Fresh (payable)', r.fresh],
+    ['Already owned', r.owned],['In-file duplicates', r.dup],['Invalid', r.invalid],
+    ['Do-not-pay total', r.dontPay]];
+  if(r.scrubbed){ rows.push(['Scrubbed', r.scrubbed],['Active', r.active],['Dead', r.dead]); }
+  if(price>0){ rows.push(['Price per lead', price],['Estimated amount saved', (r.dontPay*price).toFixed(2)]); }
+  const blob=new Blob([Papa.unparse(rows)],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='batch_report.csv'; a.click(); URL.revokeObjectURL(a.href);
+}
+$('btnReport').addEventListener('click', openReport);
+$('reportClose').addEventListener('click', ()=>$('reportModal').style.display='none');
+$('reportDone').addEventListener('click', ()=>$('reportModal').style.display='none');
+$('reportExport').addEventListener('click', exportReport);
+$('reportPrice').addEventListener('input', reportSaved);
+$('reportModal').addEventListener('click', e=>{ if(e.target===$('reportModal')) $('reportModal').style.display='none'; });
+
 $('btnReset').addEventListener('click',()=>{
   Object.assign(state,{files:[],rawRecords:[],records:[],tab:'landline',query:'',sortCol:null,page:1,step:1});
   $('folderInput').value=''; $('fileInput').value=''; $('fileList').innerHTML='';
@@ -916,7 +1045,7 @@ $('btnReset').addEventListener('click',()=>{
   $('pagination').style.display='none';
   $('btnToValidate').disabled=true;
   $('btnExportSafe').disabled=true; $('btnExportLandline').disabled=true; $('btnExportAll').disabled=true; $('btnToScrub').disabled=true;
-  $('btnExportFresh').disabled=true; $('btnMasterAdd').disabled=true;
+  $('btnExportFresh').disabled=true; $('btnMasterAdd').disabled=true; $('btnReport').disabled=true;
   $('searchInput').value='';
   // Reset online-scrub state
   scrub.running=false; scrub.counters=null;
@@ -926,13 +1055,14 @@ $('btnReset').addEventListener('click',()=>{
 });
 
 // ── Local storage: IndexedDB dataset persistence ──────────────────────────
-const DB_NAME='ukval', STORE='datasets', MASTER_STORE='master';
+const DB_NAME='ukval', STORE='datasets', MASTER_STORE='master', CACHE_STORE='scrubcache';
 function openDB(){
   return new Promise((res,rej)=>{
-    const rq=indexedDB.open(DB_NAME,2);
+    const rq=indexedDB.open(DB_NAME,3);
     rq.onupgradeneeded=()=>{ const db=rq.result;
       if(!db.objectStoreNames.contains(STORE))        db.createObjectStore(STORE,{keyPath:'id'});
       if(!db.objectStoreNames.contains(MASTER_STORE)) db.createObjectStore(MASTER_STORE,{keyPath:'p'}); // p = E.164, the key itself
+      if(!db.objectStoreNames.contains(CACHE_STORE))  db.createObjectStore(CACHE_STORE,{keyPath:'e'}); // e = E.164, plus {live,by,at}
     };
     rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error);
   });
@@ -1042,7 +1172,7 @@ $('savedList').addEventListener('click', async e=>{
     state.records=d.records; state.rawRecords=d.records.slice();
     state.records.forEach(r=>{ if(r._base===undefined) r._base=r._status; });
     updateStats(); $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
-    $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false;
+    $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false;
     state.tab='landline'; setActiveTab('landline'); renderTable(); showStep(3);
   } else if(del){
     if(confirm('Delete this saved dataset?')){ await dbDel(del.dataset.del); refreshSaved(); }

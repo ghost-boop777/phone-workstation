@@ -149,6 +149,8 @@ tr:hover td{background:rgba(99,102,241,.06)}
 .prov-key{flex:1;min-width:0;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:12px}
 .prov-key:focus{outline:none;border-color:var(--accent)}
 .prov-custom{grid-column:1 / -1}
+.prov-meta .quota{color:var(--accent);font-variant-numeric:tabular-nums}
+.prov-meta .quota.maxed{color:var(--red)}
 
 .bot-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin:12px 0}
 .bot-row{display:flex;align-items:center;gap:8px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;min-width:0}
@@ -179,6 +181,24 @@ html:not(.authed) .wizard{display:none}            /* keep the tool fully hidden
 .auth-msg{font-size:12px;color:var(--muted);min-height:18px;line-height:1.4}
 .auth-msg.err{color:var(--red)}
 .auth-who{font-size:12px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Modal + batch report ───────────────────────────────────────────────── */
+.modal-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);padding:20px}
+.modal-card{position:relative;background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:28px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.modal-close{position:absolute;top:14px;right:16px;background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer}
+.modal-close:hover{color:var(--text)}
+.modal-title{font-size:18px;margin-bottom:16px}
+.modal-foot{display:flex;justify-content:space-between;gap:8px;margin-top:20px}
+.report-body .rep-grid{display:flex;flex-direction:column;gap:2px}
+.rep-row{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-radius:8px;font-size:14px}
+.rep-row span{color:var(--muted)} .rep-row b{font-variant-numeric:tabular-nums}
+.rep-row.rep-total{background:var(--bg3)} .rep-total b{color:var(--text)}
+.rep-row.rep-pay{background:rgba(34,197,94,.12)} .rep-pay span,.rep-pay b{color:var(--green)}
+.rep-sub{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 2px;text-align:center}
+.rep-row.rep-headline{background:var(--accent);margin-top:10px;padding:12px}
+.rep-headline span,.rep-headline b{color:#fff;font-weight:700;font-size:15px}
+.report-cost{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
+.report-saved{font-size:13px;color:var(--green);font-weight:600}
 
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>UK Phone Validation Workstation</title>
-  <link rel="stylesheet" href="style.css?v=20260624a" />
+  <link rel="stylesheet" href="style.css?v=20260624b" />
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/libphonenumber-js@1.11.4/bundle/libphonenumber-max.js"></script>
@@ -226,6 +226,7 @@
         <button id="btnExportFresh" class="btn btn-primary" disabled>⬇ Fresh leads only</button>
         <button id="btnMasterAdd" class="btn btn-ghost" disabled>➕ Add clean to master</button>
         <button id="btnToScrub" class="btn btn-ghost" disabled>🌐 Online scrub →</button>
+        <button id="btnReport" class="btn btn-ghost" disabled>📊 Report</button>
         <input id="datasetName" type="text" placeholder="dataset name…" class="search-input" style="max-width:160px" />
         <button id="btnSave" class="btn btn-ghost">💾 Save</button>
         <button id="btnExportSQL" class="btn btn-ghost" disabled>🗄️ Export SQL</button>
@@ -263,17 +264,17 @@
         <div class="prov-grid">
           <label class="prov-row">
             <input type="checkbox" id="pvVeriphone" />
-            <div class="prov-meta"><strong>Veriphone</strong><small>Free 1,000 / mo · CORS ✓</small></div>
+            <div class="prov-meta"><strong>Veriphone</strong><small>Free 1,000 / mo · CORS ✓</small><small class="quota" id="quotaVeriphone"></small></div>
             <input type="password" id="keyVeriphone" placeholder="API key" class="prov-key" />
           </label>
           <label class="prov-row">
             <input type="checkbox" id="pvNumlookup" />
-            <div class="prov-meta"><strong>NumLookupAPI</strong><small>Free 100 / mo · CORS ✓</small></div>
+            <div class="prov-meta"><strong>NumLookupAPI</strong><small>Free 100 / mo · CORS ✓</small><small class="quota" id="quotaNumlookup"></small></div>
             <input type="password" id="keyNumlookup" placeholder="API key" class="prov-key" />
           </label>
           <label class="prov-row">
             <input type="checkbox" id="pvAbstract" />
-            <div class="prov-meta"><strong>AbstractAPI</strong><small>Free 100 / mo · CORS ✓</small></div>
+            <div class="prov-meta"><strong>AbstractAPI</strong><small>Free 100 / mo · CORS ✓</small><small class="quota" id="quotaAbstract"></small></div>
             <input type="password" id="keyAbstract" placeholder="API key" class="prov-key" />
           </label>
           <label class="prov-row prov-custom">
@@ -301,6 +302,8 @@
             <input id="botThrottle" type="number" value="1100" min="0" step="100" style="width:90px" />
           </label>
           <label class="opt-row checkbox-row"><input type="checkbox" id="scrubSkip" checked /><span>Skip already-checked</span></label>
+          <label class="opt-row checkbox-row"><input type="checkbox" id="scrubCacheChk" checked /><span>Use saved cache</span></label>
+          <button id="btnClearScrubCache" class="btn btn-ghost btn-sm" type="button">Clear cache</button>
         </div>
         <p class="panel-hint">More workers = faster, but stay inside free limits (most allow ~1 request/sec).
           Effective rate ≈ workers ÷ throttle. <span id="scrubTargetInfo" class="text-muted"></span></p>
@@ -314,6 +317,7 @@
           <span class="scrub-pill pill-active">✅ Active <b id="scrubActive">0</b></span>
           <span class="scrub-pill pill-dead">❌ Dead <b id="scrubDead">0</b></span>
           <span class="scrub-pill pill-unknown">⚠️ Unknown <b id="scrubUnknown">0</b></span>
+          <span class="scrub-pill">♻️ Cached <b id="scrubCached">0</b></span>
         </div>
         <div id="scrubProgress" class="live-progress"></div>
       </div>
@@ -339,6 +343,25 @@
   </section>
 </main>
 
-<script src="app.js?v=20260624a"></script>
+<!-- ══ BATCH REPORT MODAL ══ -->
+<div id="reportModal" class="modal-overlay" style="display:none">
+  <div class="modal-card">
+    <button id="reportClose" class="modal-close" title="Close">✕</button>
+    <h2 class="modal-title">📊 Batch report</h2>
+    <div id="reportBody" class="report-body"></div>
+    <div class="report-cost">
+      <label class="opt-row"><span>Price per lead (£)</span>
+        <input id="reportPrice" type="number" min="0" step="0.01" placeholder="e.g. 0.05" style="width:110px" />
+      </label>
+      <span id="reportSaved" class="report-saved"></span>
+    </div>
+    <div class="modal-foot">
+      <button id="reportExport" class="btn btn-ghost">⬇ Download report (CSV)</button>
+      <button id="reportDone" class="btn btn-primary">Done</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=20260624b"></script>
 </body>
 </html>
