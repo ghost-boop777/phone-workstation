@@ -46,8 +46,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setMsg('Opening Google sign-in…');
     try { await auth.signInWithPopup(provider); }
     catch (e) {
-      if (e.code === 'auth/operation-not-allowed')
-        setMsg('Google sign-in isn’t enabled for this project yet. Ask the admin to turn it on in Firebase → Authentication.', true);
+      if (e.code === 'auth/operation-not-allowed' || e.code === 'auth/configuration-not-found')
+        setMsg('Sign-in isn’t enabled yet. An admin needs to turn on Authentication + Google sign-in in the Firebase console, then try again.', true);
       else if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') setMsg('');
       else if (e.code === 'auth/unauthorized-domain')
         setMsg('This domain isn’t authorized in Firebase Auth settings.', true);
