@@ -164,6 +164,22 @@ tr:hover td{background:rgba(99,102,241,.06)}
 .scrub-pill b{color:var(--text)}
 .pill-active b{color:var(--green)}.pill-dead b{color:var(--red)}.pill-unknown b{color:var(--yellow)}
 
+/* ── Auth gate: shown until an allowlisted user signs in ─────────────────── */
+.auth-gate{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:20px}
+html.authed .auth-gate{display:none}
+html:not(.authed) .topbar,
+html:not(.authed) .wizard{display:none}            /* keep the tool fully hidden pre-login */
+.auth-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:40px 36px;max-width:380px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+.auth-logo{font-size:46px;margin-bottom:6px}
+.auth-card h1{font-size:22px;margin-bottom:8px;font-weight:600}
+.auth-card h1 strong{color:var(--accent)}
+.auth-sub{color:var(--muted);font-size:13px;margin-bottom:26px;line-height:1.6}
+.auth-btn{width:100%;justify-content:center;padding:12px;font-size:15px;font-weight:600;margin-bottom:14px}
+.g-mark{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#fff;color:#4285f4;font-weight:800;font-size:13px;margin-right:4px}
+.auth-msg{font-size:12px;color:var(--muted);min-height:18px;line-height:1.4}
+.auth-msg.err{color:var(--red)}
+.auth-who{font-size:12px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
 
 @media(max-width:900px){

@@ -4,12 +4,29 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>UK Phone Validation Workstation</title>
-  <link rel="stylesheet" href="style.css?v=20260623b" />
+  <link rel="stylesheet" href="style.css?v=20260624a" />
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/libphonenumber-js@1.11.4/bundle/libphonenumber-max.js"></script>
+  <!-- Auth gate: Firebase (compat) + allowlist Google sign-in -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="auth.js?v=20260624a"></script>
 </head>
 <body>
+
+<!-- ══ AUTH GATE — shown until an allowlisted user signs in ══ -->
+<div id="authGate" class="auth-gate">
+  <div class="auth-card">
+    <div class="auth-logo">📞</div>
+    <h1>Phone <strong>Workstation</strong></h1>
+    <p class="auth-sub">Private tool — authorized users only.<br/>Sign in with an approved Google account to continue.</p>
+    <button id="btnGoogleSignIn" class="btn btn-primary auth-btn">
+      <span class="g-mark">G</span> Sign in with Google
+    </button>
+    <p id="authMsg" class="auth-msg"></p>
+  </div>
+</div>
 
 <header class="topbar">
   <div class="brand">
@@ -33,6 +50,8 @@
     <button id="btnExportLandline" class="btn btn-ghost"   disabled>⬇ Landlines</button>
     <button id="btnExportAll"      class="btn btn-ghost"   disabled>⬇ All</button>
     <button id="btnReset"          class="btn btn-ghost">✕ Reset</button>
+    <span id="authWho" class="auth-who" title="Signed in"></span>
+    <button id="btnSignOut" class="btn btn-ghost">Sign out</button>
   </div>
 </header>
 
@@ -320,6 +339,6 @@
   </section>
 </main>
 
-<script src="app.js?v=20260623b"></script>
+<script src="app.js?v=20260624a"></script>
 </body>
 </html>

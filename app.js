@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-23b';
-console.log('Phone Workstation build', BUILD, '— large-file parse fix + online scrubbing');
+const BUILD = '2026-06-24a';
+console.log('Phone Workstation build', BUILD, '— auth gate + large-file fix + online scrubbing');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
