@@ -10,8 +10,8 @@
 //    Lowercase emails only. Anyone not listed is signed straight back out.
 const ALLOWED_EMAILS = [
   'helloleads2@gmail.com',
-  // 'second.user@gmail.com',
-  // 'third.user@company.com',
+  'thalableedblue@gmail.com',
+  // add more authorized emails here, lowercase
 ];
 
 const firebaseConfig = {
