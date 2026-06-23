@@ -3,77 +3,261 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Phone Workstation</title>
+  <title>UK Phone Validation Workstation</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/libphonenumber-js@1.11.4/bundle/libphonenumber-max.js"></script>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>📞 Phone Workstation</h1>
-      <p class="subtitle">Parse · Validate · Deduplicate · Export</p>
-    </header>
 
-    <main>
-      <section class="input-section">
-        <label for="phoneInput">Paste phone numbers (one per line or comma-separated)</label>
-        <textarea
-          id="phoneInput"
-          placeholder="e.g.&#10;+1 (555) 123-4567&#10;555.987.6543&#10;+44 20 7946 0958"
-          rows="10"
-        ></textarea>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">📞</span>
+    <span>UK <strong>Validation</strong> Workstation</span>
+  </div>
 
-        <div class="options-row">
-          <label class="option">
-            <input type="checkbox" id="intlFormat" checked />
-            Normalize to E.164
-          </label>
-          <label class="option">
-            <input type="checkbox" id="removeDupes" checked />
-            Remove duplicates
-          </label>
-          <label class="option">
-            <select id="defaultCountry">
-              <option value="US">Default country: US</option>
-              <option value="GB">Default country: GB</option>
-              <option value="AU">Default country: AU</option>
-              <option value="CA">Default country: CA</option>
-              <option value="IN">Default country: IN</option>
+  <!-- Step indicator -->
+  <div class="stepper" id="stepper">
+    <div class="step-chip active" data-step="1"><span class="step-no">1</span> Source</div>
+    <div class="step-sep"></div>
+    <div class="step-chip" data-step="2"><span class="step-no">2</span> Validate</div>
+    <div class="step-sep"></div>
+    <div class="step-chip" data-step="3"><span class="step-no">3</span> Results</div>
+  </div>
+
+  <div class="topbar-actions">
+    <button id="btnExportSafe"     class="btn btn-primary" disabled>⬇ TPS-safe</button>
+    <button id="btnExportLandline" class="btn btn-ghost"   disabled>⬇ Landlines</button>
+    <button id="btnExportAll"      class="btn btn-ghost"   disabled>⬇ All</button>
+    <button id="btnReset"          class="btn btn-ghost">✕ Reset</button>
+  </div>
+</header>
+
+<main class="wizard">
+
+  <!-- ══ STEP 1 — SOURCE (upload + exact file preview + storage) ══ -->
+  <section class="step-panel active" id="step1">
+    <div class="step-grid">
+      <div class="step-left">
+        <div id="dropZone" class="dropzone">
+          <div class="dropzone-icon">📂</div>
+          <p class="dropzone-title">Drop a folder or files here</p>
+          <p class="dropzone-sub">Reads inside every Excel / CSV / TXT</p>
+          <label class="btn btn-primary mt-8">📁 Select Folder
+            <input type="file" id="folderInput" webkitdirectory directory multiple hidden /></label>
+          <label class="btn btn-ghost mt-4">📄 Select Files
+            <input type="file" id="fileInput" multiple accept=".csv,.xls,.xlsx,.txt" hidden /></label>
+        </div>
+
+        <div class="panel" id="fileListPanel" style="display:none">
+          <h3 class="panel-title">Files <span id="fileCount" class="badge">0</span></h3>
+          <ul id="fileList" class="file-list"></ul>
+        </div>
+
+        <div class="panel" id="masterPanel">
+          <h3 class="panel-title">📇 Master list — numbers you own <span id="masterCount" class="badge">0</span></h3>
+          <p class="panel-hint">Import the numbers you <strong>already own</strong>. Any new lead that matches
+            one of these is flagged <strong>“Already owned”</strong> so you don't pay for it twice.
+            Stored locally in your browser — add to it after every purchase.</p>
+          <div class="sup-row">
+            <label class="btn btn-ghost">⬆ Import owned numbers<input type="file" id="masterImport" accept=".csv,.txt,.xls,.xlsx" hidden /></label>
+            <button id="btnMasterClear" class="btn btn-ghost">🗑 Clear</button>
+          </div>
+          <div id="masterStatus" class="live-progress">No master numbers yet. Import the numbers you already own.</div>
+        </div>
+
+        <div class="panel" id="savedPanel">
+          <h3 class="panel-title">💾 Saved datasets <span id="savedCount" class="badge">0</span></h3>
+          <p class="panel-hint">Stored locally in your browser (IndexedDB). Reload without re-uploading.</p>
+          <ul id="savedList" class="file-list"></ul>
+        </div>
+      </div>
+
+      <div class="step-right">
+        <div class="preview-head">
+          <h2 class="step-h">Exact file preview</h2>
+          <span id="rawInfo" class="text-muted">Select files to see their raw contents here.</span>
+        </div>
+        <div class="table-wrap" id="rawWrap">
+          <div class="empty-state" id="rawEmpty">
+            <div class="empty-icon">📄</div>
+            <p>Your uploaded rows appear here — exactly as in the file</p>
+            <p class="text-muted">No changes are made until you run validation</p>
+          </div>
+          <table id="rawTable" style="display:none">
+            <thead id="rawHead"></thead>
+            <tbody id="rawBody"></tbody>
+          </table>
+        </div>
+        <div class="step-foot">
+          <button id="btnToValidate" class="btn btn-primary" disabled>Continue to validation →</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ STEP 2 — VALIDATION OPTIONS ══ -->
+  <section class="step-panel" id="step2">
+    <div class="step-center">
+      <h2 class="step-h">Choose validation</h2>
+      <p class="text-muted mb-12" id="step2Info">Pick the checks to run on your data.</p>
+
+      <div class="opt-cards">
+        <label class="opt-card">
+          <input type="checkbox" id="optFormat" checked disabled />
+          <div><strong>Validate &amp; classify</strong><small>Format check + line type (always on)</small></div>
+        </label>
+        <label class="opt-card">
+          <input type="checkbox" id="normaliseE164" checked />
+          <div><strong>Normalise to E.164</strong><small>Convert every number to +44…</small></div>
+        </label>
+        <label class="opt-card">
+          <input type="checkbox" id="dedup" checked />
+          <div><strong>Remove duplicates</strong><small>Within this file, by canonical E.164</small></div>
+        </label>
+        <label class="opt-card">
+          <input type="checkbox" id="optMaster" checked />
+          <div><strong>Check against master list</strong><small>Flag leads you already own</small></div>
+        </label>
+        <label class="opt-card">
+          <input type="checkbox" id="ukOnly" />
+          <div><strong>UK numbers only</strong><small>Drop non-GB numbers</small></div>
+        </label>
+        <label class="opt-card">
+          <input type="checkbox" id="optOfcom" checked />
+          <div><strong>Ofcom block + carrier</strong><small>Allocation status &amp; carrier (free)</small></div>
+        </label>
+        <label class="opt-card">
+          <input type="checkbox" id="optQuality" checked />
+          <div><strong>Quality / junk patterns</strong><small>Reserved, sequential, all-same…</small></div>
+        </label>
+      </div>
+
+      <div class="opt-inline">
+        <label class="opt-row">
+          <span>Default country</span>
+          <select id="defaultCountry">
+            <option value="GB" selected>🇬🇧 UK (+44)</option>
+            <option value="US">🇺🇸 USA (+1)</option>
+            <option value="IE">🇮🇪 Ireland (+353)</option>
+            <option value="AU">🇦🇺 Australia (+61)</option>
+          </select>
+        </label>
+        <label class="opt-row">
+          <span>Phone column</span>
+          <input id="phoneCol" type="text" placeholder="auto-detect" />
+        </label>
+      </div>
+
+      <div class="panel mt-12">
+        <h3 class="panel-title">Suppression (optional, compliance)</h3>
+        <p class="panel-hint">Load <strong>TPS</strong> (consumer) / <strong>CTPS</strong> (corporate)
+          lists you've licensed, or check via a paid TPS API. Lists stay in your browser.</p>
+        <div class="sup-row">
+          <label class="btn btn-ghost">📋 TPS file<input type="file" id="tpsInput" accept=".csv,.txt" hidden /></label>
+          <label class="btn btn-ghost">🏢 CTPS file<input type="file" id="ctpsInput" accept=".csv,.txt" hidden /></label>
+          <label class="opt-row checkbox-row"><input type="checkbox" id="tpsAuto" checked /><span>Auto-suppress matches</span></label>
+        </div>
+        <div id="tpsStatus" class="live-progress">No suppression list loaded</div>
+        <div class="sup-api">
+          <input id="tpsApiKey"   type="password" placeholder="API key (optional)" />
+          <input id="tpsApiUrl"   type="text"     placeholder="https://api…/check?n={number}&key={key}" />
+          <input id="tpsApiField" type="text"     placeholder="registered field" />
+          <button id="btnTpsApi" class="btn btn-ghost" disabled>🔎 API check</button>
+        </div>
+      </div>
+
+      <div class="panel mt-12">
+        <h3 class="panel-title">Live-status API (optional)</h3>
+        <p class="panel-hint">Check if numbers are live via any provider. Pick a preset or
+          enter a custom endpoint with <code>{number}</code> &amp; <code>{key}</code> placeholders
+          and the JSON field that signals an active line. CORS-enabled providers only
+          (browser-direct); IPQS needs a proxy.</p>
+        <div class="sup-row">
+          <label class="opt-row"><span>Preset</span>
+            <select id="livePreset">
+              <option value="">Custom…</option>
+              <option value="veriphone">Veriphone (free 1k/mo, CORS ✓)</option>
+              <option value="abstract">AbstractAPI (free 100/mo, CORS ✓)</option>
+              <option value="numlookup">NumLookupAPI (free 100/mo, CORS ✓)</option>
+              <option value="ipqs">IPQualityScore (cheapest, needs proxy)</option>
             </select>
           </label>
         </div>
-
-        <button id="processBtn" class="btn-primary">Process Numbers</button>
-      </section>
-
-      <section class="results-section" id="resultsSection" hidden>
-        <div class="stats-row" id="statsRow"></div>
-
-        <div class="tabs">
-          <button class="tab active" data-tab="valid">✅ Valid</button>
-          <button class="tab" data-tab="invalid">❌ Invalid</button>
-          <button class="tab" data-tab="dupes">🔁 Duplicates</button>
+        <div class="sup-api">
+          <input id="apiKey"       type="password" placeholder="Live API key" />
+          <input id="liveApiUrl"   type="text"     placeholder="https://…/verify?phone={number}&key={key}" />
+          <input id="liveApiField" type="text"     placeholder="active field (e.g. active / phone_valid / valid)" />
+          <button id="btnLiveCheck" class="btn btn-ghost" disabled>📶 Check live status</button>
         </div>
+        <span id="liveProgress" class="live-progress"></span>
+      </div>
 
-        <div class="tab-content" id="tabValid">
-          <textarea id="validOutput" readonly></textarea>
-          <div class="export-row">
-            <button class="btn-secondary" onclick="copyOutput('validOutput')">Copy</button>
-            <button class="btn-secondary" onclick="exportCSV('valid')">Export CSV</button>
-            <button class="btn-secondary" onclick="exportTXT('valid')">Export TXT</button>
-          </div>
-        </div>
+      <div class="ofcom-line"><div id="ofcomStatus" class="live-progress">Ofcom data: loading…</div></div>
 
-        <div class="tab-content hidden" id="tabInvalid">
-          <textarea id="invalidOutput" readonly></textarea>
-        </div>
+      <div class="step-foot between">
+        <button id="btnBack" class="btn btn-ghost">← Back</button>
+        <button id="btnProcess" class="btn btn-primary">Run validation →</button>
+      </div>
+    </div>
+  </section>
 
-        <div class="tab-content hidden" id="tabDupes">
-          <textarea id="dupesOutput" readonly></textarea>
-        </div>
-      </section>
-    </main>
-  </div>
+  <!-- ══ STEP 3 — RESULTS ══ -->
+  <section class="step-panel" id="step3">
+    <div id="progressWrap" style="display:none" class="progress-wrap">
+      <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+      <span id="progressLabel">Processing…</span>
+    </div>
 
-  <script src="app.js"></script>
+    <div class="stats-bar" id="statsBar">
+      <div class="stat-card stat-total"><div class="stat-val" id="sTotal">0</div><div class="stat-lbl">Total</div></div>
+      <div class="stat-card stat-land"><div class="stat-val" id="sLand">0</div><div class="stat-lbl">☎️ Landline</div></div>
+      <div class="stat-card stat-mob"><div class="stat-val" id="sMob">0</div><div class="stat-lbl">📱 Mobile</div></div>
+      <div class="stat-card stat-other"><div class="stat-val" id="sOther">0</div><div class="stat-lbl">🔵 VoIP/Other</div></div>
+      <div class="stat-card stat-bad"><div class="stat-val" id="sBad">0</div><div class="stat-lbl">❌ Invalid</div></div>
+      <div class="stat-card stat-dup"><div class="stat-val" id="sDup">0</div><div class="stat-lbl">🔁 In-file dupes</div></div>
+      <div class="stat-card stat-owned"><div class="stat-val" id="sOwned">0</div><div class="stat-lbl">📇 Already owned</div></div>
+      <div class="stat-card stat-tps"><div class="stat-val" id="sTps">0</div><div class="stat-lbl">🚫 TPS</div></div>
+    </div>
+
+    <div class="results-toolbar">
+      <div class="tab-bar" id="tabBar">
+        <button class="tab active" data-tab="landline">☎️ Landlines</button>
+        <button class="tab" data-tab="mobile">📱 Mobile</button>
+        <button class="tab" data-tab="other">🔵 VoIP/Other</button>
+        <button class="tab" data-tab="invalid">❌ Invalid</button>
+        <button class="tab" data-tab="duplicate">🔁 In-file dupes</button>
+        <button class="tab" data-tab="owned">📇 Already owned</button>
+        <button class="tab" data-tab="tps">🚫 TPS</button>
+        <button class="tab" data-tab="all">📋 All</button>
+      </div>
+      <div class="store-row">
+        <button id="btnExportFresh" class="btn btn-primary" disabled>⬇ Fresh leads only</button>
+        <button id="btnMasterAdd" class="btn btn-ghost" disabled>➕ Add clean to master</button>
+        <input id="datasetName" type="text" placeholder="dataset name…" class="search-input" style="max-width:160px" />
+        <button id="btnSave" class="btn btn-ghost">💾 Save</button>
+        <button id="btnExportSQL" class="btn btn-ghost" disabled>🗄️ Export SQL</button>
+      </div>
+    </div>
+
+    <div class="table-toolbar" id="tableToolbar">
+      <input id="searchInput" type="text" placeholder="🔍 Search name, number, town…" class="search-input" />
+    </div>
+
+    <div class="table-wrap" id="tableWrap">
+      <div class="empty-state" id="emptyState"><div class="empty-icon">📊</div><p>Run validation to see results</p></div>
+      <table id="dataTable" style="display:none"><thead id="tableHead"></thead><tbody id="tableBody"></tbody></table>
+    </div>
+
+    <div class="pagination" id="pagination" style="display:none">
+      <button id="pgPrev" class="btn btn-ghost btn-sm">← Prev</button>
+      <span id="pgInfo"></span>
+      <button id="pgNext" class="btn btn-ghost btn-sm">Next →</button>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
 </body>
 </html>
