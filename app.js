@@ -4,6 +4,9 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
+const BUILD = '2026-06-23b';
+console.log('Phone Workstation build', BUILD, '— large-file parse fix + online scrubbing');
+
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
   sortCol: null, sortDir: 'asc', page: 1, pageSize: 100, step: 1,
