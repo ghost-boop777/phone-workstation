@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-24j';
-console.log('Phone Workstation build', BUILD, '— + client delivery-folders (dedup against delivered)');
+const BUILD = '2026-06-25a';
+console.log('Phone Workstation build', BUILD, '— + Back-to-upload on Results');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -267,6 +267,7 @@ $('btnToValidate').addEventListener('click', ()=>{ if(state.rawRecords.length){ 
 $('btnBack').addEventListener('click', ()=>showStep(1));
 $('btnToScrub').addEventListener('click', ()=>{ if(state.records.length){ updateScrubTargetInfo(); showStep(4); }});
 $('btnScrubBack').addEventListener('click', ()=>showStep(3));
+$('btnResultsBack').addEventListener('click', ()=>showStep(1));
 
 // ── File ingestion → exact-file preview (Step 1) ──────────────────────────
 $('folderInput').addEventListener('change', e => addFiles(e.target.files));
