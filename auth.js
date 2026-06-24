@@ -73,3 +73,24 @@ if (auth) auth.onAuthStateChanged(user => {
     auth.signOut();
   }
 });
+
+// ── Google Drive access token (drive.file scope) — minted on demand ────────
+// Only the file the user picks in the Picker is exposed (drive.file is non-sensitive),
+// and it's always the *signed-in* account's own Drive (login_hint).
+let driveToken = null;
+async function ensureDriveToken(){
+  if(driveToken) return driveToken;
+  if(!auth) throw new Error('Not signed in.');
+  const dp = new firebase.auth.GoogleAuthProvider();
+  dp.addScope('https://www.googleapis.com/auth/drive.file');
+  if(auth.currentUser && auth.currentUser.email) dp.setCustomParameters({ login_hint: auth.currentUser.email });
+  const result = await auth.signInWithPopup(dp);
+  const cred = (result && result.credential) ||
+    (firebase.auth.GoogleAuthProvider.credentialFromResult && firebase.auth.GoogleAuthProvider.credentialFromResult(result));
+  driveToken = cred && cred.accessToken;
+  if(!driveToken) throw new Error('Drive permission was not granted.');
+  return driveToken;
+}
+window.ensureDriveToken = ensureDriveToken;
+window.getDriveToken    = () => driveToken;
+window.clearDriveToken  = () => { driveToken = null; };

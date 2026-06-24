@@ -12,7 +12,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-  <script src="auth.js?v=20260624d"></script>
+  <script src="https://apis.google.com/js/api.js"></script>
+  <script src="auth.js?v=20260624e"></script>
 </head>
 <body>
 
@@ -70,6 +71,7 @@
             <input type="file" id="folderInput" webkitdirectory directory multiple hidden /></label>
           <label class="btn btn-ghost mt-4">📄 Select Files
             <input type="file" id="fileInput" multiple accept=".csv,.xls,.xlsx,.txt" hidden /></label>
+          <button id="btnDriveImport" class="btn btn-ghost mt-4" type="button">☁ Import from Google Drive</button>
         </div>
 
         <div class="panel" id="fileListPanel" style="display:none">
@@ -363,6 +365,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20260624d"></script>
+<script src="app.js?v=20260624e"></script>
 </body>
 </html>

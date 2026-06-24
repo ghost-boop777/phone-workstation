@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-24d';
-console.log('Phone Workstation build', BUILD, '— + shared master list (Firestore)');
+const BUILD = '2026-06-24e';
+console.log('Phone Workstation build', BUILD, '— + import from Google Drive');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -271,6 +271,66 @@ $('btnScrubBack').addEventListener('click', ()=>showStep(3));
 // ── File ingestion → exact-file preview (Step 1) ──────────────────────────
 $('folderInput').addEventListener('change', e => addFiles(e.target.files));
 $('fileInput').addEventListener('change',   e => addFiles(e.target.files));
+
+// ── Import from Google Drive (signed-in user's OWN Drive, via Google Picker) ─
+const DRIVE_API_KEY = 'AIzaSyDK7wcA-0hujY-Ii09NIvMSPdIulFOFgtc';   // public Firebase web key, also Picker dev key
+const DRIVE_APP_ID  = '437695082938';
+const SHEET_MIME    = 'application/vnd.google-apps.spreadsheet';
+const XLSX_MIME     = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+function loadPicker(){
+  return new Promise((res,rej)=>{
+    if(window.google && google.picker) return res();
+    if(typeof gapi==='undefined') return rej(new Error('Google API failed to load (check connection).'));
+    gapi.load('picker', { callback:res, onerror:()=>rej(new Error('Google Picker failed to load.')) });
+  });
+}
+async function driveImport(){
+  if(typeof window.ensureDriveToken!=='function') return alert('Please sign in first.');
+  let token;
+  try{ token = await window.ensureDriveToken(); }
+  catch(e){ if(String(e).indexOf('popup-closed')<0) alert('Could not get Drive access: '+(e.message||e)); return; }
+  try{ await loadPicker(); }catch(e){ return alert(e.message||'Picker unavailable.'); }
+
+  const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+    .setIncludeFolders(true).setSelectFolderEnabled(false)
+    .setMimeTypes(['text/csv','text/plain','application/vnd.ms-excel',XLSX_MIME,SHEET_MIME].join(','));
+  new google.picker.PickerBuilder()
+    .setOAuthToken(token)
+    .setDeveloperKey(DRIVE_API_KEY)
+    .setAppId(DRIVE_APP_ID)
+    .addView(view)
+    .setTitle('Pick a lead file (CSV / Excel / Google Sheet)')
+    .setCallback(drivePicked)
+    .build()
+    .setVisible(true);
+}
+async function drivePicked(data){
+  if(!data || data.action !== google.picker.Action.PICKED) return;
+  const doc = data.docs && data.docs[0]; if(!doc) return;
+  $('rawInfo').textContent = `Downloading “${doc.name}” from Drive…`;
+  try{
+    const file = await driveDownloadAsFile(doc.id, doc.name, doc.mimeType);
+    await addFiles([file]);
+  }catch(e){ $('rawInfo').textContent=`Drive download failed: ${e.message||e}`; alert('Drive download failed: '+(e.message||e)); }
+}
+async function driveDownloadAsFile(fileId, name, mime){
+  const isSheet = mime===SHEET_MIME;
+  const url = isSheet
+    ? `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(XLSX_MIME)}`
+    : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+  const outName = isSheet && !/\.xlsx$/i.test(name) ? name+'.xlsx' : name;
+  let token = window.getDriveToken();
+  let res = await fetch(url, { headers:{ Authorization:'Bearer '+token } });
+  if(res.status===401){                              // token expired → mint a fresh one, retry once
+    window.clearDriveToken(); token = await window.ensureDriveToken();
+    res = await fetch(url, { headers:{ Authorization:'Bearer '+token } });
+  }
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const blob = await res.blob();
+  return new File([blob], outName, { type: blob.type || mime });
+}
+$('btnDriveImport').addEventListener('click', driveImport);
 
 const dz = $('dropZone');
 dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
