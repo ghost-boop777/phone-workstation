@@ -188,6 +188,11 @@ html.is-admin #btnUsers{display:inline-flex}
 .user-tag{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border:1px solid var(--accent);border-radius:99px;padding:1px 7px;margin-left:6px}
 .users-add{display:flex;gap:8px;align-items:center}
 .users-add .search-input{flex:1}
+.client-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.client-row select,.client-row input{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px}
+.client-row select{min-width:130px}
+.client-row input{flex:1;min-width:120px}
+.client-row select:focus,.client-row input:focus{outline:none;border-color:var(--accent)}
 
 /* ── Modal + batch report ───────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);padding:20px}

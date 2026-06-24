@@ -4,12 +4,12 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-24g';
-console.log('Phone Workstation build', BUILD, '— + self-serve user management');
+const BUILD = '2026-06-24h';
+console.log('Phone Workstation build', BUILD, '— internal selling server: client tagging, no cost');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
-  sortCol: null, sortDir: 'asc', page: 1, pageSize: 100, step: 1,
+  sortCol: null, sortDir: 'asc', page: 1, pageSize: 100, step: 1, client: '',
 };
 
 const PHONE_VARIANTS = ['phone','mobile','cell','telephone','tel','number','phone_number',
@@ -1090,42 +1090,35 @@ function buildReport(){
   const scrubbed = state.records.filter(r=>r._live).length;
   return { total, fresh, owned, dup, invalid, dontPay, active, dead, scrubbed };
 }
-const fmtMoney = n => '£' + n.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2});
-
-function reportSaved(){
-  const r=buildReport(), price=parseFloat($('reportPrice').value)||0;
-  $('reportSaved').textContent = price>0
-    ? `Avoided paying ~${fmtMoney(r.dontPay*price)} (${r.dontPay.toLocaleString()} leads × ${fmtMoney(price)}).`
-    : '';
-}
 function openReport(){
   if(!state.records.length) return alert('Run validation first.');
   const r=buildReport();
+  const client = state.client ? `<div class="rep-row rep-total"><span>📁 Client</span><b>${state.client}</b></div>` : '';
   const scrub = r.scrubbed
     ? `<div class="rep-sub">live scrub</div>
        <div class="rep-row"><span>✅ Active</span><b>${r.active.toLocaleString()}</b></div>
        <div class="rep-row"><span>❌ Dead</span><b>${r.dead.toLocaleString()}</b></div>` : '';
   $('reportBody').innerHTML = `<div class="rep-grid">
-    <div class="rep-row rep-total"><span>Total uploaded</span><b>${r.total.toLocaleString()}</b></div>
-    <div class="rep-row rep-pay"><span>✅ Fresh — worth buying</span><b>${r.fresh.toLocaleString()}</b></div>
-    <div class="rep-sub">don’t pay for these</div>
-    <div class="rep-row"><span>📇 Already owned</span><b>${r.owned.toLocaleString()}</b></div>
+    ${client}
+    <div class="rep-row rep-total"><span>Total records</span><b>${r.total.toLocaleString()}</b></div>
+    <div class="rep-row rep-pay"><span>✅ Valid — sendable</span><b>${r.fresh.toLocaleString()}</b></div>
+    <div class="rep-sub">excluded</div>
+    <div class="rep-row"><span>📇 Already in master</span><b>${r.owned.toLocaleString()}</b></div>
     <div class="rep-row"><span>🔁 In-file duplicates</span><b>${r.dup.toLocaleString()}</b></div>
     <div class="rep-row"><span>❌ Invalid</span><b>${r.invalid.toLocaleString()}</b></div>
     ${scrub}
-    <div class="rep-row rep-headline"><span>You only pay for</span><b>${r.fresh.toLocaleString()} of ${r.total.toLocaleString()}</b></div>
+    <div class="rep-row rep-headline"><span>Sendable</span><b>${r.fresh.toLocaleString()} of ${r.total.toLocaleString()}</b></div>
   </div>`;
-  reportSaved();
   $('reportModal').style.display='flex';
 }
 function exportReport(){
-  const r=buildReport(), price=parseFloat($('reportPrice').value)||0;
+  const r=buildReport();
   const rows=[['Metric','Value'],
-    ['Total uploaded', r.total],['Fresh (payable)', r.fresh],
-    ['Already owned', r.owned],['In-file duplicates', r.dup],['Invalid', r.invalid],
-    ['Do-not-pay total', r.dontPay]];
+    ['Client', state.client||''],
+    ['Total records', r.total],['Valid (sendable)', r.fresh],
+    ['Already in master', r.owned],['In-file duplicates', r.dup],['Invalid', r.invalid],
+    ['Excluded total', r.dontPay]];
   if(r.scrubbed){ rows.push(['Scrubbed', r.scrubbed],['Active', r.active],['Dead', r.dead]); }
-  if(price>0){ rows.push(['Price per lead', price],['Estimated amount saved', (r.dontPay*price).toFixed(2)]); }
   const blob=new Blob([Papa.unparse(rows)],{type:'text/csv;charset=utf-8;'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='batch_report.csv'; a.click(); URL.revokeObjectURL(a.href);
 }
@@ -1133,7 +1126,6 @@ $('btnReport').addEventListener('click', openReport);
 $('reportClose').addEventListener('click', ()=>$('reportModal').style.display='none');
 $('reportDone').addEventListener('click', ()=>$('reportModal').style.display='none');
 $('reportExport').addEventListener('click', exportReport);
-$('reportPrice').addEventListener('input', reportSaved);
 $('reportModal').addEventListener('click', e=>{ if(e.target===$('reportModal')) $('reportModal').style.display='none'; });
 
 // ── Batch history + ROI dashboard (shared via Firestore) ───────────────────
@@ -1141,17 +1133,17 @@ let _historyRows = [];
 async function batchSave(){
   if(!state.records.length) return alert('Run validation first.');
   if(!_db) return alert('Sign in to save the shared batch history.');
+  if(!state.client && !confirm('No client selected for this batch. Save without a client?')) return;
   const r = buildReport();
-  const price = parseFloat($('reportPrice').value)||0;
   const by = (firebase.auth().currentUser||{}).email || 'unknown';
   const files = [...new Set(state.records.map(x=>x._file).filter(Boolean))];
   $('reportSaveHistory').disabled=true;
   try{
     await _db.collection('batches').add({
       at: firebase.firestore.FieldValue.serverTimestamp(), by,
+      client: state.client||'(none)',
       total:r.total, fresh:r.fresh, owned:r.owned, dup:r.dup, invalid:r.invalid,
-      active:r.active, dead:r.dead, scrubbed:r.scrubbed,
-      price, saved:+(r.dontPay*price).toFixed(2), files
+      active:r.active, dead:r.dead, scrubbed:r.scrubbed, files
     });
     $('reportSaveHistory').textContent='✓ Saved';
     setTimeout(()=>{ $('reportSaveHistory').textContent='💾 Save to history'; $('reportSaveHistory').disabled=false; }, 1500);
@@ -1168,24 +1160,24 @@ async function historyOpen(){
   }catch(e){ $('historyBody').innerHTML = `<p class="text-muted" style="padding:12px">Could not load history: ${e.message||e}</p>`; }
 }
 function renderHistory(rows){
-  let totalSaved=0, totalFresh=0;
-  rows.forEach(b=>{ totalSaved += (b.saved||0); totalFresh += (b.fresh||0); });
-  $('historyTotal').innerHTML = `<b>${rows.length}</b> batch(es) · <b>${totalFresh.toLocaleString()}</b> fresh leads · total saved <b>${fmtMoney(totalSaved)}</b>`;
+  let totalFresh=0; const clients={};
+  rows.forEach(b=>{ totalFresh += (b.fresh||0); clients[b.client||'(none)']=true; });
+  $('historyTotal').innerHTML = `<b>${rows.length}</b> batch(es) · <b>${totalFresh.toLocaleString()}</b> valid leads · <b>${Object.keys(clients).length}</b> client(s)`;
   $('historyBody').innerHTML = rows.length ? `<table class="hist-table">
-    <thead><tr><th>Date</th><th>By</th><th>Total</th><th>Fresh</th><th>Don’t-pay</th><th>Saved</th></tr></thead>
+    <thead><tr><th>Date</th><th>Client</th><th>By</th><th>Total</th><th>Sendable</th><th>Excluded</th></tr></thead>
     <tbody>${rows.map(b=>{
       const d = b.at && b.at.toDate ? b.at.toDate() : null;
-      const dontPay = (b.owned||0)+(b.dup||0)+(b.invalid||0);
-      return `<tr><td>${d?d.toLocaleString():'—'}</td><td title="${b.by||''}">${(b.by||'').split('@')[0]||'—'}</td><td>${(b.total||0).toLocaleString()}</td><td>${(b.fresh||0).toLocaleString()}</td><td>${dontPay.toLocaleString()}</td><td>${b.saved?fmtMoney(b.saved):'—'}</td></tr>`;
+      const excl = (b.owned||0)+(b.dup||0)+(b.invalid||0);
+      return `<tr><td>${d?d.toLocaleString():'—'}</td><td>${b.client||'—'}</td><td title="${b.by||''}">${(b.by||'').split('@')[0]||'—'}</td><td>${(b.total||0).toLocaleString()}</td><td>${(b.fresh||0).toLocaleString()}</td><td>${excl.toLocaleString()}</td></tr>`;
     }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No batches saved yet. Run a batch → open 📊 Report → 💾 Save to history.</p>';
 }
 function historyExport(){
   if(!_historyRows.length) return alert('No history to export.');
   const out = _historyRows.map(b=>({
     date: b.at && b.at.toDate ? b.at.toDate().toISOString() : '',
-    by: b.by||'', total:b.total||0, fresh:b.fresh||0, owned:b.owned||0,
-    in_file_dupes:b.dup||0, invalid:b.invalid||0, active:b.active||0, dead:b.dead||0,
-    price:b.price||0, saved:b.saved||0, files:(b.files||[]).join(' | ')
+    client: b.client||'', by: b.by||'', total:b.total||0, sendable:b.fresh||0,
+    already_in_master:b.owned||0, in_file_dupes:b.dup||0, invalid:b.invalid||0,
+    active:b.active||0, dead:b.dead||0, files:(b.files||[]).join(' | ')
   }));
   const blob=new Blob([Papa.unparse(out)],{type:'text/csv;charset=utf-8;'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='batch_history.csv'; a.click(); URL.revokeObjectURL(a.href);
@@ -1237,6 +1229,38 @@ $('usersAddEmail').addEventListener('keydown', e=>{ if(e.key==='Enter') usersAdd
 $('usersList').addEventListener('click', e=>{ const b=e.target.closest('[data-remove]'); if(b) usersRemove(b.dataset.remove); });
 $('usersModal').addEventListener('click', e=>{ if(e.target===$('usersModal')) $('usersModal').style.display='none'; });
 
+// ── Client list (managed dropdown + free-type) ─────────────────────────────
+let _clients = [];
+async function clientsLoad(){
+  if(!_db) return;
+  try{ const snap=await _db.doc('config/clients').get(); _clients=((snap.exists && snap.data().names)||[]).slice().sort(); }
+  catch(_){ _clients=[]; }
+  renderClients();
+}
+function renderClients(){
+  const sel=$('clientSelect'); if(!sel) return;
+  const cur=state.client||'';
+  sel.innerHTML = '<option value="">— select client —</option>' +
+    _clients.map(c=>`<option value="${c}"${c===cur?' selected':''}>${c}</option>`).join('');
+}
+async function clientAdd(name){
+  name=(name||'').trim();
+  if(!name) return;
+  if(!_clients.some(c=>c.toLowerCase()===name.toLowerCase())){
+    _clients.push(name); _clients.sort();
+    if(_db){ try{ await _db.doc('config/clients').set({ names: firebase.firestore.FieldValue.arrayUnion(name) }, {merge:true}); }
+             catch(e){ $('clientStatus').textContent='Could not save client: '+(e.message||e); } }
+  }
+  state.client=name; renderClients();
+  if($('clientNew')) $('clientNew').value='';
+  $('clientStatus').textContent=`Client: ${name}`;
+}
+if($('clientSelect')){
+  $('clientSelect').addEventListener('change', e=>{ state.client=e.target.value; $('clientStatus').textContent=state.client?`Client: ${state.client}`:''; });
+  $('clientAddBtn').addEventListener('click', ()=>clientAdd($('clientNew').value));
+  $('clientNew').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); clientAdd($('clientNew').value); } });
+}
+
 $('btnReset').addEventListener('click',()=>{
   Object.assign(state,{files:[],rawRecords:[],records:[],tab:'landline',query:'',sortCol:null,page:1,step:1});
   $('folderInput').value=''; $('fileInput').value=''; $('fileList').innerHTML='';
@@ -1282,11 +1306,8 @@ let _db = null, _masterUnsub = null, _cloudSeeded = false, _cloudReady = false;
 const MASTER_COL = 'master', CLOUD_SHARD = 5000;
 
 async function masterLoad(){
-  try{
-    const db=await openDB();
-    const keys=await new Promise((res,rej)=>{const tx=db.transaction(MASTER_STORE,'readonly');const rq=tx.objectStore(MASTER_STORE).getAllKeys();rq.onsuccess=()=>res(rq.result||[]);rq.onerror=()=>rej(rq.error);});
-    masterSet.clear(); keys.forEach(k=>masterSet.add(k));
-  }catch(_){ /* no store yet */ }
+  // Master is now cloud-authoritative (loaded via Firestore on sign-in). Local IndexedDB is
+  // no longer read into the set, so a cloud clear can't be undone by stale local data.
   masterStatus();
 }
 async function masterAddBulk(e164s){
@@ -1320,19 +1341,13 @@ function masterStatus(){
 function masterCloudInit(){
   if(_masterUnsub || typeof firebase==='undefined' || !firebase.firestore) return;
   try{ _db = firebase.firestore(); }catch(_){ _db=null; return; }
+  clientsLoad();                          // populate the client dropdown
   _masterUnsub = _db.collection(MASTER_COL).onSnapshot(snap=>{
     _cloudReady = true;
-    let added=0;
-    snap.forEach(d=>{ const nums=d.data().nums||[]; for(const e of nums){ if(!masterSet.has(e)){ masterSet.add(e); added++; } } });
-    // one-time: seed cloud with any local-only numbers (e.g. an existing 168k list)
-    if(!_cloudSeeded){
-      _cloudSeeded = true;
-      const cloud=new Set(); snap.forEach(d=>(d.data().nums||[]).forEach(e=>cloud.add(e)));
-      const localOnly=[...masterSet].filter(e=>!cloud.has(e));
-      if(localOnly.length) masterCloudPush(localOnly);
-    }
+    masterSet.clear();                    // cloud is the single source of truth
+    snap.forEach(d=>(d.data().nums||[]).forEach(e=>masterSet.add(e)));
     masterStatus();
-    if(added && state.records.length) recompute();
+    if(state.records.length) recompute();
   }, err=>{ console.warn('master cloud sync error', err); });
 }
 // Write numbers up to Firestore in sharded array docs.

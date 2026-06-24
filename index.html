@@ -80,6 +80,17 @@
           <ul id="fileList" class="file-list"></ul>
         </div>
 
+        <div class="panel" id="clientPanel">
+          <h3 class="panel-title">📁 Client <span class="text-muted" style="text-transform:none;font-weight:400">— this data is for</span></h3>
+          <p class="panel-hint">Tag every upload with the client it's going to. Pick a saved client, or type a new one (it's saved for next time).</p>
+          <div class="client-row">
+            <select id="clientSelect"><option value="">— select client —</option></select>
+            <input id="clientNew" type="text" placeholder="or type a new client…" />
+            <button id="clientAddBtn" class="btn btn-ghost btn-sm" type="button">+ Add</button>
+          </div>
+          <div id="clientStatus" class="live-progress"></div>
+        </div>
+
         <div class="panel" id="masterPanel">
           <h3 class="panel-title">📇 Master list — numbers you own <span id="masterCount" class="badge">0</span></h3>
           <p class="panel-hint">Import the numbers you <strong>already own</strong>. Any new lead that matches
@@ -354,12 +365,6 @@
     <button id="reportClose" class="modal-close" title="Close">✕</button>
     <h2 class="modal-title">📊 Batch report</h2>
     <div id="reportBody" class="report-body"></div>
-    <div class="report-cost">
-      <label class="opt-row"><span>Price per lead (£)</span>
-        <input id="reportPrice" type="number" min="0" step="0.01" placeholder="e.g. 0.05" style="width:110px" />
-      </label>
-      <span id="reportSaved" class="report-saved"></span>
-    </div>
     <div class="modal-foot">
       <button id="reportExport" class="btn btn-ghost">⬇ Download report (CSV)</button>
       <button id="reportSaveHistory" class="btn btn-ghost">💾 Save to history</button>
@@ -398,6 +403,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20260624g"></script>
+<script src="app.js?v=20260624h"></script>
 </body>
 </html>
