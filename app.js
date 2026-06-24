@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-24e';
-console.log('Phone Workstation build', BUILD, '— + import from Google Drive');
+const BUILD = '2026-06-24f';
+console.log('Phone Workstation build', BUILD, '— + batch history / ROI dashboard');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1135,6 +1135,67 @@ $('reportDone').addEventListener('click', ()=>$('reportModal').style.display='no
 $('reportExport').addEventListener('click', exportReport);
 $('reportPrice').addEventListener('input', reportSaved);
 $('reportModal').addEventListener('click', e=>{ if(e.target===$('reportModal')) $('reportModal').style.display='none'; });
+
+// ── Batch history + ROI dashboard (shared via Firestore) ───────────────────
+let _historyRows = [];
+async function batchSave(){
+  if(!state.records.length) return alert('Run validation first.');
+  if(!_db) return alert('Sign in to save the shared batch history.');
+  const r = buildReport();
+  const price = parseFloat($('reportPrice').value)||0;
+  const by = (firebase.auth().currentUser||{}).email || 'unknown';
+  const files = [...new Set(state.records.map(x=>x._file).filter(Boolean))];
+  $('reportSaveHistory').disabled=true;
+  try{
+    await _db.collection('batches').add({
+      at: firebase.firestore.FieldValue.serverTimestamp(), by,
+      total:r.total, fresh:r.fresh, owned:r.owned, dup:r.dup, invalid:r.invalid,
+      active:r.active, dead:r.dead, scrubbed:r.scrubbed,
+      price, saved:+(r.dontPay*price).toFixed(2), files
+    });
+    $('reportSaveHistory').textContent='✓ Saved';
+    setTimeout(()=>{ $('reportSaveHistory').textContent='💾 Save to history'; $('reportSaveHistory').disabled=false; }, 1500);
+  }catch(e){ $('reportSaveHistory').disabled=false; alert('Could not save batch: '+(e.message||e)); }
+}
+async function historyOpen(){
+  if(!_db) return alert('Sign in to view the shared batch history.');
+  $('historyTotal').textContent=''; $('historyBody').innerHTML='<p class="text-muted" style="padding:12px">Loading…</p>';
+  $('historyModal').style.display='flex';
+  try{
+    const snap = await _db.collection('batches').orderBy('at','desc').limit(500).get();
+    const rows=[]; snap.forEach(d=>rows.push(d.data()));
+    _historyRows = rows; renderHistory(rows);
+  }catch(e){ $('historyBody').innerHTML = `<p class="text-muted" style="padding:12px">Could not load history: ${e.message||e}</p>`; }
+}
+function renderHistory(rows){
+  let totalSaved=0, totalFresh=0;
+  rows.forEach(b=>{ totalSaved += (b.saved||0); totalFresh += (b.fresh||0); });
+  $('historyTotal').innerHTML = `<b>${rows.length}</b> batch(es) · <b>${totalFresh.toLocaleString()}</b> fresh leads · total saved <b>${fmtMoney(totalSaved)}</b>`;
+  $('historyBody').innerHTML = rows.length ? `<table class="hist-table">
+    <thead><tr><th>Date</th><th>By</th><th>Total</th><th>Fresh</th><th>Don’t-pay</th><th>Saved</th></tr></thead>
+    <tbody>${rows.map(b=>{
+      const d = b.at && b.at.toDate ? b.at.toDate() : null;
+      const dontPay = (b.owned||0)+(b.dup||0)+(b.invalid||0);
+      return `<tr><td>${d?d.toLocaleString():'—'}</td><td title="${b.by||''}">${(b.by||'').split('@')[0]||'—'}</td><td>${(b.total||0).toLocaleString()}</td><td>${(b.fresh||0).toLocaleString()}</td><td>${dontPay.toLocaleString()}</td><td>${b.saved?fmtMoney(b.saved):'—'}</td></tr>`;
+    }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No batches saved yet. Run a batch → open 📊 Report → 💾 Save to history.</p>';
+}
+function historyExport(){
+  if(!_historyRows.length) return alert('No history to export.');
+  const out = _historyRows.map(b=>({
+    date: b.at && b.at.toDate ? b.at.toDate().toISOString() : '',
+    by: b.by||'', total:b.total||0, fresh:b.fresh||0, owned:b.owned||0,
+    in_file_dupes:b.dup||0, invalid:b.invalid||0, active:b.active||0, dead:b.dead||0,
+    price:b.price||0, saved:b.saved||0, files:(b.files||[]).join(' | ')
+  }));
+  const blob=new Blob([Papa.unparse(out)],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='batch_history.csv'; a.click(); URL.revokeObjectURL(a.href);
+}
+$('reportSaveHistory').addEventListener('click', batchSave);
+$('btnHistory').addEventListener('click', historyOpen);
+$('historyClose').addEventListener('click', ()=>$('historyModal').style.display='none');
+$('historyDone').addEventListener('click', ()=>$('historyModal').style.display='none');
+$('historyExport').addEventListener('click', historyExport);
+$('historyModal').addEventListener('click', e=>{ if(e.target===$('historyModal')) $('historyModal').style.display='none'; });
 
 $('btnReset').addEventListener('click',()=>{
   Object.assign(state,{files:[],rawRecords:[],records:[],tab:'landline',query:'',sortCol:null,page:1,step:1});

@@ -230,6 +230,7 @@
         <button id="btnMasterAdd" class="btn btn-ghost" disabled>➕ Add clean to master</button>
         <button id="btnToScrub" class="btn btn-ghost" disabled>🌐 Online scrub →</button>
         <button id="btnReport" class="btn btn-ghost" disabled>📊 Report</button>
+        <button id="btnHistory" class="btn btn-ghost">📜 History</button>
         <input id="datasetName" type="text" placeholder="dataset name…" class="search-input" style="max-width:160px" />
         <button id="btnSave" class="btn btn-ghost">💾 Save</button>
         <button id="btnExportSQL" class="btn btn-ghost" disabled>🗄️ Export SQL</button>
@@ -360,11 +361,26 @@
     </div>
     <div class="modal-foot">
       <button id="reportExport" class="btn btn-ghost">⬇ Download report (CSV)</button>
+      <button id="reportSaveHistory" class="btn btn-ghost">💾 Save to history</button>
       <button id="reportDone" class="btn btn-primary">Done</button>
     </div>
   </div>
 </div>
 
-<script src="app.js?v=20260624e"></script>
+<!-- ══ BATCH HISTORY MODAL ══ -->
+<div id="historyModal" class="modal-overlay" style="display:none">
+  <div class="modal-card" style="max-width:660px">
+    <button id="historyClose" class="modal-close" title="Close">✕</button>
+    <h2 class="modal-title">📜 Batch history <span class="text-muted" style="font-size:12px;font-weight:400">(shared)</span></h2>
+    <div id="historyTotal" class="history-total"></div>
+    <div id="historyBody" class="history-body"></div>
+    <div class="modal-foot">
+      <button id="historyExport" class="btn btn-ghost">⬇ Export history (CSV)</button>
+      <button id="historyDone" class="btn btn-primary">Done</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=20260624f"></script>
 </body>
 </html>

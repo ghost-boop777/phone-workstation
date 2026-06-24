@@ -16,6 +16,11 @@ service cloud.firestore {
       allow read, write: if allowed();
     }
 
+    // Shared batch history (one doc per saved batch: counts, savings, scrub).
+    match /batches/{doc} {
+      allow read, write: if allowed();
+    }
+
     // Everything else is denied.
     match /{document=**} {
       allow read, write: if false;

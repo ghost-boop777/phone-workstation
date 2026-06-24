@@ -199,6 +199,14 @@ html:not(.authed) .wizard{display:none}            /* keep the tool fully hidden
 .rep-headline span,.rep-headline b{color:#fff;font-weight:700;font-size:15px}
 .report-cost{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
 .report-saved{font-size:13px;color:var(--green);font-weight:600}
+.history-total{background:var(--accent);color:#fff;border-radius:10px;padding:12px 14px;font-size:14px;margin-bottom:14px}
+.history-total b{font-weight:700}
+.history-body{max-height:50vh;overflow:auto}
+.hist-table{width:100%;border-collapse:collapse;font-size:12px}
+.hist-table th{position:sticky;top:0;background:var(--bg2);color:var(--muted);text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border)}
+.hist-table td{padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+.hist-table td:last-child{color:var(--green);font-weight:600}
+.hist-table tbody tr:hover td{background:rgba(99,102,241,.06)}
 
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
 
