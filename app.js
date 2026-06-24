@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-24f';
-console.log('Phone Workstation build', BUILD, '— + batch history / ROI dashboard');
+const BUILD = '2026-06-24g';
+console.log('Phone Workstation build', BUILD, '— + self-serve user management');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1196,6 +1196,46 @@ $('historyClose').addEventListener('click', ()=>$('historyModal').style.display=
 $('historyDone').addEventListener('click', ()=>$('historyModal').style.display='none');
 $('historyExport').addEventListener('click', historyExport);
 $('historyModal').addEventListener('click', e=>{ if(e.target===$('historyModal')) $('historyModal').style.display='none'; });
+
+// ── Self-serve user management (founders/owners only) ──────────────────────
+async function usersOpen(){
+  if(!_db) return alert('Sign in first.');
+  $('usersMsg').textContent=''; $('usersAddEmail').value='';
+  $('usersModal').style.display='flex';
+  await usersRender();
+}
+async function usersRender(){
+  let added=[];
+  try{ const snap=await _db.doc('config/allowlist').get(); added=(snap.exists && snap.data().emails)||[]; }catch(_){}
+  const founders=(typeof ALLOWED_EMAILS!=='undefined'?ALLOWED_EMAILS:[]).map(e=>e.toLowerCase());
+  const extra=added.map(e=>String(e).toLowerCase()).filter(e=>!founders.includes(e));
+  const rows=[...founders.map(e=>({email:e,owner:true})), ...extra.map(e=>({email:e,owner:false}))];
+  $('usersList').innerHTML=rows.map(u=>`<li class="user-row"><span>${u.email}${u.owner?'<span class="user-tag">owner</span>':''}</span>${u.owner?'':`<button class="btn btn-ghost btn-sm" data-remove="${u.email}">Remove</button>`}</li>`).join('');
+}
+async function usersAdd(){
+  const email=($('usersAddEmail').value||'').trim().toLowerCase();
+  if(!email || email.indexOf('@')<1){ $('usersMsg').textContent='Enter a valid email.'; return; }
+  $('usersMsg').textContent='Adding…';
+  try{
+    await _db.doc('config/allowlist').set({ emails: firebase.firestore.FieldValue.arrayUnion(email) }, {merge:true});
+    $('usersAddEmail').value=''; $('usersMsg').textContent=`Added ${email}. They can sign in now.`;
+    await usersRender();
+  }catch(e){ $('usersMsg').textContent='Could not add (owners only): '+(e.message||e); }
+}
+async function usersRemove(email){
+  if(!confirm(`Remove ${email}? They lose access on next sign-in.`)) return;
+  try{
+    await _db.doc('config/allowlist').set({ emails: firebase.firestore.FieldValue.arrayRemove(email) }, {merge:true});
+    await usersRender();
+  }catch(e){ alert('Could not remove: '+(e.message||e)); }
+}
+$('btnUsers').addEventListener('click', usersOpen);
+$('usersClose').addEventListener('click', ()=>$('usersModal').style.display='none');
+$('usersDone').addEventListener('click', ()=>$('usersModal').style.display='none');
+$('usersAddBtn').addEventListener('click', usersAdd);
+$('usersAddEmail').addEventListener('keydown', e=>{ if(e.key==='Enter') usersAdd(); });
+$('usersList').addEventListener('click', e=>{ const b=e.target.closest('[data-remove]'); if(b) usersRemove(b.dataset.remove); });
+$('usersModal').addEventListener('click', e=>{ if(e.target===$('usersModal')) $('usersModal').style.display='none'; });
 
 $('btnReset').addEventListener('click',()=>{
   Object.assign(state,{files:[],rawRecords:[],records:[],tab:'landline',query:'',sortCol:null,page:1,step:1});

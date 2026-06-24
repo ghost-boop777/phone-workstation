@@ -62,16 +62,27 @@ document.addEventListener('DOMContentLoaded', () => {
   if (out) out.addEventListener('click', () => auth && auth.signOut());
 });
 
-if (auth) auth.onAuthStateChanged(user => {
-  if (!user) { lock(); setMsg(''); return; }
+if (auth) auth.onAuthStateChanged(async user => {
+  if (!user) { document.documentElement.classList.remove('is-admin'); lock(); setMsg(''); return; }
   const email = (user.email || '').toLowerCase();
+  // Founders: always allowed + admin (hardcoded root — works even before any Firestore config exists)
   if (ALLOWED_EMAILS.includes(email)) {
+    document.documentElement.classList.add('is-admin');
     unlock(user.email);
-  } else {
-    lock();
-    setMsg(`${user.email} is not authorized for this tool. Ask the admin to add you.`, true);
-    auth.signOut();
+    return;
   }
+  // Otherwise consult the self-serve allowlist stored in Firestore
+  try {
+    if (firebase.firestore) {
+      const snap = await firebase.firestore().doc('config/allowlist').get();
+      const list = (snap.exists ? (snap.data().emails || []) : []).map(e => String(e).toLowerCase());
+      if (list.includes(email)) { document.documentElement.classList.remove('is-admin'); unlock(user.email); return; }
+    }
+  } catch (e) { /* fall through to denial */ }
+  document.documentElement.classList.remove('is-admin');
+  lock();
+  setMsg(`${user.email} is not authorized. Ask an admin to add you.`, true);
+  auth.signOut();
 });
 
 // ── Google Drive access token (drive.file scope) — minted on demand ────────

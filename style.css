@@ -181,6 +181,13 @@ html:not(.authed) .wizard{display:none}            /* keep the tool fully hidden
 .auth-msg{font-size:12px;color:var(--muted);min-height:18px;line-height:1.4}
 .auth-msg.err{color:var(--red)}
 .auth-who{font-size:12px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#btnUsers{display:none}                 /* admin-only — revealed by html.is-admin */
+html.is-admin #btnUsers{display:inline-flex}
+.users-list{list-style:none;margin:0 0 14px;max-height:40vh;overflow:auto}
+.user-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:13px}
+.user-tag{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border:1px solid var(--accent);border-radius:99px;padding:1px 7px;margin-left:6px}
+.users-add{display:flex;gap:8px;align-items:center}
+.users-add .search-input{flex:1}
 
 /* ── Modal + batch report ───────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);padding:20px}
