@@ -226,6 +226,7 @@
       <div class="stat-card stat-bad"><div class="stat-val" id="sBad">0</div><div class="stat-lbl">❌ Invalid</div></div>
       <div class="stat-card stat-dup"><div class="stat-val" id="sDup">0</div><div class="stat-lbl">🔁 In-file dupes</div></div>
       <div class="stat-card stat-owned"><div class="stat-val" id="sOwned">0</div><div class="stat-lbl">📇 Already owned</div></div>
+      <div class="stat-card stat-delivered"><div class="stat-val" id="sDelivered">0</div><div class="stat-lbl">📤 Delivered</div></div>
       <div class="stat-card stat-tps"><div class="stat-val" id="sTps">0</div><div class="stat-lbl">🚫 TPS</div></div>
     </div>
 
@@ -237,6 +238,7 @@
         <button class="tab" data-tab="invalid">❌ Invalid</button>
         <button class="tab" data-tab="duplicate">🔁 In-file dupes</button>
         <button class="tab" data-tab="owned">📇 Already owned</button>
+        <button class="tab" data-tab="delivered">📤 Delivered</button>
         <button class="tab" data-tab="tps">🚫 TPS</button>
         <button class="tab" data-tab="all">📋 All</button>
       </div>
@@ -244,6 +246,7 @@
         <button id="btnExportFresh" class="btn btn-primary" disabled>⬇ Fresh leads only</button>
         <button id="btnMasterAdd" class="btn btn-ghost" disabled>➕ Add clean to master</button>
         <button id="btnToScrub" class="btn btn-ghost" disabled>🌐 Online scrub →</button>
+        <button id="btnDeliver" class="btn btn-ghost" disabled>📤 Mark delivered</button>
         <button id="btnReport" class="btn btn-ghost" disabled>📊 Report</button>
         <button id="btnHistory" class="btn btn-ghost">📜 History</button>
         <input id="datasetName" type="text" placeholder="dataset name…" class="search-input" style="max-width:160px" />
@@ -406,6 +409,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20260624i"></script>
+<script src="app.js?v=20260624j"></script>
 </body>
 </html>

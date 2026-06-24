@@ -39,6 +39,11 @@ service cloud.firestore {
       allow read, write: if allowed();
     }
 
+    // Per-client delivered numbers (sharded docs tagged with `client`).
+    match /delivered/{doc} {
+      allow read, write: if allowed();
+    }
+
     // Everything else is denied.
     match /{document=**} {
       allow read, write: if false;

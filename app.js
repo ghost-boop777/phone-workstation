@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-24i';
-console.log('Phone Workstation build', BUILD, '— master report + every-column + active-check');
+const BUILD = '2026-06-24j';
+console.log('Phone Workstation build', BUILD, '— + client delivery-folders (dedup against delivered)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -469,6 +469,7 @@ async function runValidation(){
 
   showProgress(78,'Checking against master list…'); await tick();
   if($('optMaster').checked) markOwned(state.records);
+  markDelivered(state.records);
 
   showProgress(82,'Removing in-file duplicates…'); await tick();
   if($('dedup').checked) dedup(state.records);
@@ -482,7 +483,7 @@ async function runValidation(){
   $('progressWrap').style.display='none';
   $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
   $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false;
-  $('btnToScrub').disabled=false; $('btnReport').disabled=false; updateScrubTargetInfo();
+  $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnDeliver').disabled=false; updateScrubTargetInfo();
   $('btnTpsApi').disabled = !$('tpsApiUrl').value.trim();
   $('btnProcess').disabled = false;
   state.tab='landline'; setActiveTab('landline');
@@ -676,7 +677,7 @@ function markOwned(records){
 function dedup(records){
   const seen=new Set();
   records.forEach(r=>{
-    if(r._status==='invalid'||r._status==='owned'||!r._e164) return;
+    if(r._status==='invalid'||r._status==='owned'||r._status==='delivered'||!r._e164) return;
     if(seen.has(r._e164)){ r._status='duplicate'; r._reason='Duplicate in this file'; }
     else seen.add(r._e164);
   });
@@ -688,6 +689,7 @@ function recompute(){
   if(!state.records.length) return;
   state.records.forEach(r=>{ r._status = r._base; if(r._base!=='invalid') r._reason=''; });
   if($('optMaster').checked) markOwned(state.records);
+  markDelivered(state.records);
   if($('dedup').checked)     dedup(state.records);
   applyTps(); updateStats(); renderTable();
 }
@@ -702,6 +704,7 @@ function updateStats(){
   $('sBad').textContent   = c('invalid').toLocaleString();
   $('sDup').textContent   = c('duplicate').toLocaleString();
   $('sOwned').textContent = c('owned').toLocaleString();
+  $('sDelivered').textContent = c('delivered').toLocaleString();
   $('sTps').textContent   = state.records.filter(r=>r._tps).length.toLocaleString();
 }
 
@@ -744,7 +747,7 @@ function renderTable(){
   }).join('')}</tr>`;
 
   $('tableBody').innerHTML = pageRows.map(r=>`<tr>${cols.map(c=>{
-    if(c==='_status'){const m={landline:'b-landline ☎️ Landline',mobile:'b-mobile 📱 Mobile',other:'b-other 🔵 '+r._line,invalid:'b-invalid ❌ Invalid',duplicate:'b-duplicate 🔁 Dup',owned:'b-owned 📇 Owned'};
+    if(c==='_status'){const m={landline:'b-landline ☎️ Landline',mobile:'b-mobile 📱 Mobile',other:'b-other 🔵 '+r._line,invalid:'b-invalid ❌ Invalid',duplicate:'b-duplicate 🔁 Dup',owned:'b-owned 📇 Owned',delivered:'b-delivered 📤 Delivered'};
       const raw=m[r._status]||'b-other '+r._status;const cls=raw.split(' ')[0];const lbl=raw.split(' ').slice(1).join(' ');
       return `<td><span class="badge-status ${cls}">${lbl}</span></td>`;}
     if(c==='_e164') return `<td><code>${r._e164||''}</code></td>`;
@@ -1251,15 +1254,66 @@ async function clientAdd(name){
     if(_db){ try{ await _db.doc('config/clients').set({ names: firebase.firestore.FieldValue.arrayUnion(name) }, {merge:true}); }
              catch(e){ $('clientStatus').textContent='Could not save client: '+(e.message||e); } }
   }
-  state.client=name; renderClients();
+  renderClients();
   if($('clientNew')) $('clientNew').value='';
-  $('clientStatus').textContent=`Client: ${name}`;
+  selectClient(name);
+}
+function selectClient(name){
+  state.client = name||'';
+  $('clientStatus').textContent = state.client ? `Client: ${state.client}` : '';
+  clientDeliveredLoad(state.client);
 }
 if($('clientSelect')){
-  $('clientSelect').addEventListener('change', e=>{ state.client=e.target.value; $('clientStatus').textContent=state.client?`Client: ${state.client}`:''; });
+  $('clientSelect').addEventListener('change', e=>selectClient(e.target.value));
   $('clientAddBtn').addEventListener('click', ()=>clientAdd($('clientNew').value));
   $('clientNew').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); clientAdd($('clientNew').value); } });
 }
+
+// ── Per-client delivered folders (never re-send a client the same number) ──
+let _deliveredSet = new Set(), _deliveredUnsub = null;
+function clientDeliveredLoad(client){
+  if(_deliveredUnsub){ _deliveredUnsub(); _deliveredUnsub=null; }
+  _deliveredSet = new Set();
+  if(!_db || !client){ deliveredStatus(); if(state.records.length) recompute(); return; }
+  _deliveredUnsub = _db.collection('delivered').where('client','==',client).onSnapshot(snap=>{
+    _deliveredSet = new Set();
+    snap.forEach(d=>(d.data().nums||[]).forEach(e=>_deliveredSet.add(e)));
+    deliveredStatus();
+    if(state.records.length) recompute();
+  }, err=>console.warn('delivered load error', err));
+}
+function deliveredStatus(){
+  if($('clientStatus') && state.client)
+    $('clientStatus').textContent = `Client: ${state.client} · ${_deliveredSet.size.toLocaleString()} already delivered`;
+}
+function markDelivered(records){
+  if(!_deliveredSet.size) return;
+  records.forEach(r=>{
+    if(r._status==='invalid'||!r._e164) return;
+    if(_deliveredSet.has(r._e164)){ r._status='delivered'; r._reason='Already delivered to '+(state.client||'this client'); }
+  });
+}
+async function deliveredAdd(client, e164s){
+  for(let i=0;i<e164s.length;i+=CLOUD_SHARD){
+    const chunk=e164s.slice(i,i+CLOUD_SHARD);
+    try{ await _db.collection('delivered').add({ client, nums:chunk, at: firebase.firestore.FieldValue.serverTimestamp() }); }
+    catch(e){ console.warn('delivered add failed', e); break; }
+  }
+}
+async function deliverToClient(){
+  if(!state.client) return alert('Select a client first (📁 Client panel in Step 1).');
+  if(!_db) return alert('Sign in first.');
+  if(!state.records.length) return alert('Run validation first.');
+  const sendable=[...new Set(state.records.filter(r=>['landline','mobile','other'].includes(r._status)).map(r=>r._e164))]
+    .filter(e=>e && !_deliveredSet.has(e));
+  if(!sendable.length) return alert('No new sendable numbers (all are already delivered, owned, or invalid).');
+  if(!confirm(`Mark ${sendable.length.toLocaleString()} number(s) as delivered to ${state.client}? They'll be excluded from future deliveries to this client.`)) return;
+  $('btnDeliver').disabled=true;
+  await deliveredAdd(state.client, sendable);
+  $('btnDeliver').disabled=false;
+  alert(`Recorded ${sendable.length.toLocaleString()} delivered to ${state.client}.`);
+}
+$('btnDeliver').addEventListener('click', deliverToClient);
 
 $('btnReset').addEventListener('click',()=>{
   Object.assign(state,{files:[],rawRecords:[],records:[],tab:'landline',query:'',sortCol:null,page:1,step:1});
@@ -1271,7 +1325,7 @@ $('btnReset').addEventListener('click',()=>{
   $('pagination').style.display='none';
   $('btnToValidate').disabled=true;
   $('btnExportSafe').disabled=true; $('btnExportLandline').disabled=true; $('btnExportAll').disabled=true; $('btnToScrub').disabled=true;
-  $('btnExportFresh').disabled=true; $('btnMasterAdd').disabled=true; $('btnReport').disabled=true;
+  $('btnExportFresh').disabled=true; $('btnMasterAdd').disabled=true; $('btnReport').disabled=true; $('btnDeliver').disabled=true;
   $('searchInput').value='';
   // Reset online-scrub state
   scrub.running=false; scrub.counters=null;
@@ -1531,7 +1585,7 @@ $('savedList').addEventListener('click', async e=>{
     state.records=d.records; state.rawRecords=d.records.slice();
     state.records.forEach(r=>{ if(r._base===undefined) r._base=r._status; });
     updateStats(); $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
-    $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false;
+    $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnDeliver').disabled=false;
     state.tab='landline'; setActiveTab('landline'); renderTable(); showStep(3);
   } else if(del){
     if(confirm('Delete this saved dataset?')){ await dbDel(del.dataset.del); refreshSaved(); }

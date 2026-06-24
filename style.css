@@ -83,12 +83,14 @@ html,body{height:100%;font-family:'Segoe UI',system-ui,sans-serif;background:var
 .fi-status.done{background:var(--green)}.fi-status.error{background:var(--red)}
 
 .content{display:flex;flex-direction:column;overflow:hidden;padding:16px;gap:12px}
-.stats-bar{display:grid;grid-template-columns:repeat(8,1fr);gap:10px}
+.stats-bar{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px}
 .stat-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:14px 10px;text-align:center}
 .stat-total{border-top:3px solid var(--accent)}.stat-land{border-top:3px solid var(--green)}
 .stat-mob{border-top:3px solid var(--blue)}.stat-other{border-top:3px solid #8b5cf6}
 .stat-bad{border-top:3px solid var(--red)}.stat-dup{border-top:3px solid var(--yellow)}
 .stat-owned{border-top:3px solid #d946ef}
+.stat-delivered{border-top:3px solid #0ea5e9}
+.b-delivered{background:rgba(14,165,233,.16);color:#38bdf8}
 .stat-tps{border-top:3px solid #f43f5e}
 .b-tps{background:rgba(244,63,94,.18);color:#fb7185}
 .b-owned{background:rgba(217,70,239,.16);color:#e879f9}
