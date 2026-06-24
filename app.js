@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-24c';
-console.log('Phone Workstation build', BUILD, '— + Web Worker parsing + chunked validation');
+const BUILD = '2026-06-24d';
+console.log('Phone Workstation build', BUILD, '— + shared master list (Firestore)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1113,8 +1113,12 @@ async function dbAll(){ const db=await openDB(); return new Promise((res,rej)=>{
 async function dbGet(id){ const db=await openDB(); return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const rq=tx.objectStore(STORE).get(id);rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej(rq.error);}); }
 async function dbDel(id){ const db=await openDB(); return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);}); }
 
-// ── Master list store: persistent set of E.164 numbers you already own ─────
+// ── Master list: in-memory set, persisted locally (IndexedDB) + shared cloud (Firestore) ─
 const masterSet = new Set();
+
+// Cloud (Firestore) state
+let _db = null, _masterUnsub = null, _cloudSeeded = false, _cloudReady = false;
+const MASTER_COL = 'master', CLOUD_SHARD = 5000;
 
 async function masterLoad(){
   try{
@@ -1130,6 +1134,7 @@ async function masterAddBulk(e164s){
     const db=await openDB();
     await new Promise((res,rej)=>{const tx=db.transaction(MASTER_STORE,'readwrite');const st=tx.objectStore(MASTER_STORE);fresh.forEach(p=>st.put({p}));tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});
     fresh.forEach(e=>masterSet.add(e));
+    masterCloudAdd(fresh);                 // mirror new numbers to the shared cloud list
   }
   masterStatus();
   return fresh.length;
@@ -1137,14 +1142,58 @@ async function masterAddBulk(e164s){
 async function masterClearAll(){
   const db=await openDB();
   await new Promise((res,rej)=>{const tx=db.transaction(MASTER_STORE,'readwrite');tx.objectStore(MASTER_STORE).clear();tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});
-  masterSet.clear(); masterStatus();
+  masterSet.clear();
+  await masterCloudClear();               // also clear the shared cloud list
+  masterStatus();
 }
 function masterStatus(){
   const n=masterSet.size;
   if($('masterCount'))  $('masterCount').textContent=n.toLocaleString();
   if($('masterStatus')) $('masterStatus').textContent = n
-    ? `${n.toLocaleString()} owned number(s) — every new lead is checked against these.`
-    : 'No master numbers yet. Import the numbers you already own.';
+    ? `${n.toLocaleString()} owned number(s)${_cloudReady?' · ☁ shared':''} — every new lead is checked against these.`
+    : (_cloudReady ? 'No master numbers yet (shared). Import the numbers you already own.' : 'No master numbers yet. Import the numbers you already own.');
+}
+
+// ── Shared master list via Firestore (real-time, additive) ────────────────
+// Called once after an allowlisted user signs in (from auth.js → unlock()).
+function masterCloudInit(){
+  if(_masterUnsub || typeof firebase==='undefined' || !firebase.firestore) return;
+  try{ _db = firebase.firestore(); }catch(_){ _db=null; return; }
+  _masterUnsub = _db.collection(MASTER_COL).onSnapshot(snap=>{
+    _cloudReady = true;
+    let added=0;
+    snap.forEach(d=>{ const nums=d.data().nums||[]; for(const e of nums){ if(!masterSet.has(e)){ masterSet.add(e); added++; } } });
+    // one-time: seed cloud with any local-only numbers (e.g. an existing 168k list)
+    if(!_cloudSeeded){
+      _cloudSeeded = true;
+      const cloud=new Set(); snap.forEach(d=>(d.data().nums||[]).forEach(e=>cloud.add(e)));
+      const localOnly=[...masterSet].filter(e=>!cloud.has(e));
+      if(localOnly.length) masterCloudPush(localOnly);
+    }
+    masterStatus();
+    if(added && state.records.length) recompute();
+  }, err=>{ console.warn('master cloud sync error', err); });
+}
+// Write numbers up to Firestore in sharded array docs.
+async function masterCloudPush(e164s){
+  if(!_db || !e164s.length) return 0;
+  let n=0;
+  for(let i=0;i<e164s.length;i+=CLOUD_SHARD){
+    const chunk=e164s.slice(i,i+CLOUD_SHARD);
+    try{ await _db.collection(MASTER_COL).add({ nums:chunk, at: firebase.firestore.FieldValue.serverTimestamp() }); n+=chunk.length; }
+    catch(e){ console.warn('master cloud push failed', e); break; }
+  }
+  return n;
+}
+function masterCloudAdd(fresh){ if(_db && fresh && fresh.length) masterCloudPush(fresh); }
+async function masterCloudClear(){
+  if(!_db) return;
+  try{
+    const snap=await _db.collection(MASTER_COL).get();
+    let batch=_db.batch(), c=0;
+    for(const d of snap.docs){ batch.delete(d.ref); if(++c%400===0){ await batch.commit(); batch=_db.batch(); } }
+    await batch.commit();
+  }catch(e){ console.warn('master cloud clear failed', e); }
 }
 
 // Parse a file of owned numbers (CSV / TXT / Excel) into a Set of E.164.

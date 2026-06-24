@@ -26,7 +26,11 @@ const firebaseConfig = {
 const _$ = id => document.getElementById(id);
 function setMsg(t, isErr){ const m=_$('authMsg'); if(m){ m.textContent=t||''; m.classList.toggle('err', !!isErr); } }
 function lock(){ document.documentElement.classList.remove('authed'); }
-function unlock(email){ document.documentElement.classList.add('authed'); const w=_$('authWho'); if(w) w.textContent=email; }
+function unlock(email){
+  document.documentElement.classList.add('authed');
+  const w=_$('authWho'); if(w) w.textContent=email;
+  if(typeof masterCloudInit==='function') masterCloudInit();   // start shared master-list sync
+}
 
 let auth = null, provider = null;
 try {
