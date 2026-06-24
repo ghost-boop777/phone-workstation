@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-24h';
-console.log('Phone Workstation build', BUILD, '— internal selling server: client tagging, no cost');
+const BUILD = '2026-06-24i';
+console.log('Phone Workstation build', BUILD, '— master report + every-column + active-check');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1332,9 +1332,97 @@ function masterStatus(){
   const n=masterSet.size;
   if($('masterCount'))  $('masterCount').textContent=n.toLocaleString();
   if($('masterStatus')) $('masterStatus').textContent = n
-    ? `${n.toLocaleString()} owned number(s)${_cloudReady?' · ☁ shared':''} — every new lead is checked against these.`
-    : (_cloudReady ? 'No master numbers yet (shared). Import the numbers you already own.' : 'No master numbers yet. Import the numbers you already own.');
+    ? `${n.toLocaleString()} owned number(s)${_cloudReady?' · ☁ shared':''}.`
+    : (_cloudReady ? 'No master numbers yet (shared). Import the numbers you own.' : 'No master numbers yet. Import the numbers you own.');
 }
+
+// ── Master live report (offline validation) + active-check (online scrub) ──
+const masterClass = new Map();   // e164 -> mobile|landline|voip|other|invalid (cached)
+function classifyE164(e){
+  if(masterClass.has(e)) return masterClass.get(e);
+  let cls='invalid', p=null;
+  try{ p=libphonenumber.parsePhoneNumber(e); }catch(_){}
+  if(p && p.isValid()){
+    const t=p.getType();
+    cls = t==='MOBILE' ? 'mobile' : t==='FIXED_LINE' ? 'landline'
+        : t==='FIXED_LINE_OR_MOBILE' ? 'mobile' : t==='VOIP' ? 'voip' : 'other';
+  }
+  masterClass.set(e, cls);
+  return cls;
+}
+let _mrptBusy=false;
+async function masterReportCompute(){
+  if(_mrptBusy) return; _mrptBusy=true;
+  const arr=[...masterSet];
+  const r={total:arr.length, mobile:0,landline:0,voip:0,other:0,invalid:0, active:0,dead:0,checked:0};
+  for(let i=0;i<arr.length;i++){
+    const e=arr[i], c=classifyE164(e);
+    if(c==='mobile')r.mobile++; else if(c==='landline')r.landline++; else if(c==='voip')r.voip++; else if(c==='other')r.other++; else r.invalid++;
+    const sc=scrubCacheMap.get(e);
+    if(sc){ r.checked++; if(sc.live==='active')r.active++; else if(sc.live==='dead')r.dead++; }
+    if((i & 8191)===8191) await tick();
+  }
+  r.valid=r.mobile+r.landline+r.voip+r.other;
+  renderMasterReport(r); _mrptBusy=false; return r;
+}
+function renderMasterReport(r){
+  const el=$('masterReport'); if(!el) return;
+  if(!r || !r.total){ el.innerHTML=''; return; }
+  el.innerHTML = `<div class="mrep-grid">
+    <span class="mrep valid">✅ Valid<b>${r.valid.toLocaleString()}</b></span>
+    <span class="mrep invalid">❌ Invalid<b>${r.invalid.toLocaleString()}</b></span>
+    <span class="mrep voip">🔵 VoIP<b>${r.voip.toLocaleString()}</b></span>
+    <span class="mrep">📱 Mobile<b>${r.mobile.toLocaleString()}</b></span>
+    <span class="mrep">☎️ Landline<b>${r.landline.toLocaleString()}</b></span>
+    <span class="mrep active">📶 Active<b>${r.active.toLocaleString()}</b></span>
+    <span class="mrep dead">📵 Dead<b>${r.dead.toLocaleString()}</b></span>
+    <span class="mrep unch">⏳ Unchecked<b>${Math.max(0,r.valid-r.checked).toLocaleString()}</b></span>
+  </div>`;
+}
+
+// Active-check ALL master numbers via the bot-worker pool (Step 4 providers/quota/cache).
+const mscrub={ running:false, queue:[], idx:0, call:0, providers:[], throttle:1100, done:0, _auto:false };
+function nextMscrubProvider(){
+  const n=mscrub.providers.length;
+  for(let k=0;k<n;k++){ const p=mscrub.providers[(mscrub.call++)%n]; if(quotaRemaining(p.id)>0) return p; }
+  return null;
+}
+async function masterScrubWorker(){
+  while(mscrub.running){
+    const i=mscrub.idx++; if(i>=mscrub.queue.length) break;
+    const e=mscrub.queue[i];
+    if(scrubCacheMap.has(e)){ mscrub.done++; continue; }
+    const prov=nextMscrubProvider();
+    if(!prov){ mscrub.running=false; $('masterScrubStatus').textContent='Stopped — providers hit their monthly free limit. Add a paid endpoint in Step 4 for more.'; break; }
+    quotaBump(prov.id);
+    const u=prov.url.replace('{number}',encodeURIComponent(e)).replace('{key}',encodeURIComponent(prov.key||''));
+    try{
+      const d=await (await fetch(u)).json();
+      const v=dig(d,prov.field);
+      const active = v===true||v===1||['true','active','yes','1'].includes(String(v).toLowerCase());
+      scrubCachePut(e, active?'active':'dead', prov.name);
+    }catch(_){ /* leave unchecked */ }
+    mscrub.done++;
+    if(mscrub.done%10===0){ $('masterScrubStatus').textContent=`Checking active… ${mscrub.done.toLocaleString()} done`; masterReportCompute(); renderQuota(); }
+    if(mscrub.throttle) await sleep(mscrub.throttle);
+  }
+}
+async function masterScrubAll(){
+  if(mscrub.running){ mscrub.running=false; $('btnMasterCheck').textContent='📶 Check active (all)'; $('masterScrubStatus').textContent='Stopped.'; return; }
+  const providers=buildScrubProviders();
+  if(!providers.length){ $('masterScrubStatus').textContent='Add a provider + API key in Step 4 (Scrub) to check active status.'; return; }
+  const targets=[...masterSet].filter(e=>!scrubCacheMap.has(e) && classifyE164(e)!=='invalid');
+  if(!targets.length){ $('masterScrubStatus').textContent='All valid master numbers already checked.'; return; }
+  const n=Math.max(1,Math.min(8,+($('botCount')?.value)||3));
+  Object.assign(mscrub,{running:true, queue:targets, idx:0, call:0, providers, throttle:Math.max(0,+($('botThrottle')?.value)||1100), done:0});
+  $('btnMasterCheck').textContent='⏹ Stop checking';
+  $('masterScrubStatus').textContent=`Checking ${targets.length.toLocaleString()} number(s)…`;
+  await Promise.all(Array.from({length:n},()=>masterScrubWorker()));
+  mscrub.running=false; $('btnMasterCheck').textContent='📶 Check active (all)';
+  $('masterScrubStatus').textContent=`Done — ${mscrub.done.toLocaleString()} checked this run.`;
+  masterReportCompute();
+}
+if($('btnMasterCheck')) $('btnMasterCheck').addEventListener('click', masterScrubAll);
 
 // ── Shared master list via Firestore (real-time, additive) ────────────────
 // Called once after an allowlisted user signs in (from auth.js → unlock()).
@@ -1347,7 +1435,10 @@ function masterCloudInit(){
     masterSet.clear();                    // cloud is the single source of truth
     snap.forEach(d=>(d.data().nums||[]).forEach(e=>masterSet.add(e)));
     masterStatus();
+    masterReportCompute();                // refresh the live master report
     if(state.records.length) recompute();
+    // auto-check active on all numbers (only once, only if a provider is configured)
+    if(!mscrub._auto && masterSet.size && buildScrubProviders().length){ mscrub._auto=true; masterScrubAll(); }
   }, err=>{ console.warn('master cloud sync error', err); });
 }
 // Write numbers up to Firestore in sharded array docs.
@@ -1374,20 +1465,21 @@ async function masterCloudClear(){
 
 // Parse a file of owned numbers (CSV / TXT / Excel) into a Set of E.164.
 async function parseOwnedFile(file, defCountry){
-  const ext=file.name.split('.').pop().toLowerCase();
-  let tokens=[];
-  if(ext==='xls'||ext==='xlsx'){
-    const rows=await parseExcel(file);
-    rows.forEach(r=>Object.values(r).forEach(v=>{ if(v!=null && v!=='') tokens.push(String(v)); }));
-  }else{
-    tokens=(await file.text()).split(/[\s,;"'\t]+/);
-  }
+  // Parse into proper rows (worker → no freeze) and scan EVERY column, parsing each
+  // cell value WHOLE (so "07911 123456" with spaces isn't split and lost).
+  let rows;
+  try{ rows = await parseViaWorker(file); }catch(_){ rows = await parseFile(file); }
   const set=new Set();
-  for(const tok of tokens){
-    const t=String(tok).trim(); if(t.length<7 || !/\d/.test(t)) continue;
-    let p=null; try{ p=libphonenumber.parsePhoneNumber(t, defCountry||'GB'); }catch(_){}
-    if(p && p.isValid()) set.add(p.format('E.164'));
+  for(const r of rows){
+    for(const k in r){
+      if(k.charCodeAt(0)===95) continue;           // skip internal _file etc.
+      const v=r[k]; if(v==null||v==='') continue;
+      const t=String(v).trim(); if(t.length<7 || !/\d/.test(t)) continue;
+      let p=null; try{ p=libphonenumber.parsePhoneNumber(t, defCountry||'GB'); }catch(_){}
+      if(p && p.isValid()) set.add(p.format('E.164'));
+    }
   }
+  set._rowsRead = rows.length;
   return set;
 }
 
@@ -1398,9 +1490,10 @@ $('masterImport').addEventListener('change', async e=>{
     const def=$('defaultCountry')?.value||'GB';
     const set=await parseOwnedFile(f, def);
     const added=await masterAddBulk([...set]);
-    $('masterStatus').textContent=`Imported ${set.size.toLocaleString()} valid number(s) · ${added.toLocaleString()} new · master now ${masterSet.size.toLocaleString()}.`;
+    $('masterStatus').textContent=`Read ${(set._rowsRead||0).toLocaleString()} rows · ${set.size.toLocaleString()} unique valid found (every column) · ${added.toLocaleString()} new added · master now ${masterSet.size.toLocaleString()}.`;
     e.target.value='';
-    recompute();   // re-flag on-screen results against the updated master
+    recompute();          // re-flag on-screen results against the updated master
+    masterReportCompute();// refresh the live master report
   }catch(err){ $('masterStatus').textContent='Could not read that file.'; console.warn(err); }
 });
 $('btnMasterClear').addEventListener('click', async ()=>{

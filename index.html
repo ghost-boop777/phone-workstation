@@ -92,15 +92,18 @@
         </div>
 
         <div class="panel" id="masterPanel">
-          <h3 class="panel-title">📇 Master list — numbers you own <span id="masterCount" class="badge">0</span></h3>
-          <p class="panel-hint">Import the numbers you <strong>already own</strong>. Any new lead that matches
-            one of these is flagged <strong>“Already owned”</strong> so you don't pay for it twice.
-            Stored locally in your browser — add to it after every purchase.</p>
+          <h3 class="panel-title">📇 Master — numbers you own <span id="masterCount" class="badge">0</span></h3>
+          <p class="panel-hint">Your whole owned repository (shared cloud). Imports dedupe across
+            <strong>every column</strong>. The live report below validates all numbers; “Check active”
+            checks them online.</p>
           <div class="sup-row">
             <label class="btn btn-ghost">⬆ Import owned numbers<input type="file" id="masterImport" accept=".csv,.txt,.xls,.xlsx" hidden /></label>
+            <button id="btnMasterCheck" class="btn btn-ghost">📶 Check active (all)</button>
             <button id="btnMasterClear" class="btn btn-ghost">🗑 Clear</button>
           </div>
-          <div id="masterStatus" class="live-progress">No master numbers yet. Import the numbers you already own.</div>
+          <div id="masterReport" class="master-report"></div>
+          <div id="masterStatus" class="live-progress">No master numbers yet. Import the numbers you own.</div>
+          <div id="masterScrubStatus" class="live-progress"></div>
         </div>
 
         <div class="panel" id="savedPanel">
@@ -403,6 +406,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20260624h"></script>
+<script src="app.js?v=20260624i"></script>
 </body>
 </html>

@@ -193,6 +193,12 @@ html.is-admin #btnUsers{display:inline-flex}
 .client-row select{min-width:130px}
 .client-row input{flex:1;min-width:120px}
 .client-row select:focus,.client-row input:focus{outline:none;border-color:var(--accent)}
+.master-report{margin:10px 0}
+.mrep-grid{display:flex;flex-wrap:wrap;gap:6px}
+.mrep{background:var(--bg2);border:1px solid var(--border);border-radius:99px;padding:3px 10px;font-size:11px;color:var(--muted);white-space:nowrap}
+.mrep b{color:var(--text);margin-left:3px;font-variant-numeric:tabular-nums}
+.mrep.valid b{color:var(--green)}.mrep.invalid b{color:var(--red)}.mrep.voip b{color:#a78bfa}
+.mrep.active b{color:var(--green)}.mrep.dead b{color:var(--red)}.mrep.unch b{color:var(--yellow)}
 
 /* ── Modal + batch report ───────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);padding:20px}
