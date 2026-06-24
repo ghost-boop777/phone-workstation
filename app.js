@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-24b';
-console.log('Phone Workstation build', BUILD, '— auth + savings report + scrub cache/quota');
+const BUILD = '2026-06-24c';
+console.log('Phone Workstation build', BUILD, '— + Web Worker parsing + chunked validation');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -301,6 +301,34 @@ dz.addEventListener('drop', e => {
 
 function isSupported(name){ return /\.(csv|xls|xlsx|txt)$/i.test(name); }
 
+// ── Off-main-thread parsing (Web Worker) with main-thread fallback ─────────
+let _parseWorker = null, _workerOff = false;
+function getParseWorker(){
+  if(_workerOff) return null;
+  if(!_parseWorker){
+    try{ _parseWorker = new Worker('parse-worker.js'); }
+    catch(_){ _workerOff = true; return null; }
+  }
+  return _parseWorker;
+}
+function parseViaWorker(file, onProgress){
+  return new Promise((resolve, reject)=>{
+    const w = getParseWorker();
+    if(!w) return reject(new Error('worker unavailable'));
+    const onMsg = e=>{
+      const m=e.data||{};
+      if(m.type==='progress'){ if(onProgress) onProgress(m.count); }
+      else if(m.type==='done'){ cleanup(); resolve(m.rows||[]); }
+      else if(m.type==='error'){ cleanup(); reject(new Error(m.message||'parse error')); }
+    };
+    const onErr = ()=>{ cleanup(); _workerOff=true; _parseWorker=null; reject(new Error('worker crashed')); };
+    function cleanup(){ w.removeEventListener('message', onMsg); w.removeEventListener('error', onErr); }
+    w.addEventListener('message', onMsg);
+    w.addEventListener('error', onErr);
+    w.postMessage({ file });   // File is structured-cloneable
+  });
+}
+
 async function addFiles(files){
   const incoming = Array.from(files).filter(f => isSupported(f.name));
   if(!incoming.length) return;
@@ -312,7 +340,9 @@ async function addFiles(files){
     $('rawInfo').textContent = `Reading ${f.name}…`;
     await tick();                                   // let the UI paint before the heavy parse
     try{
-      const rows = await parseFile(f);
+      let rows;
+      try{ rows = await parseViaWorker(f, c=>{ $('rawInfo').textContent = `Reading ${f.name}… ${c.toLocaleString()} rows`; }); }
+      catch(werr){ rows = await parseFile(f); }     // worker unavailable → parse on main thread
       for(let i=0;i<rows.length;i++){ rows[i]._file=f.name; state.rawRecords.push(rows[i]); }  // element-wise (spread breaks on huge arrays)
       $('rawInfo').textContent = `Read ${state.rawRecords.length.toLocaleString()} rows so far…`;
     }
@@ -369,8 +399,10 @@ async function runValidation(){
   showProgress(40,'Detecting phone column…'); await tick();
   const phoneCol = detectCol(state.records, colHint);
 
-  showProgress(60,'Validating & classifying…'); await tick();
-  classify(state.records, phoneCol, defCountry, { ofcom:$('optOfcom').checked, quality:$('optQuality').checked });
+  showProgress(50,'Validating & classifying…'); await tick();
+  await classifyChunked(state.records, phoneCol, defCountry,
+    { ofcom:$('optOfcom').checked, quality:$('optQuality').checked },
+    (done,total)=>showProgress(50 + Math.round(done/total*30), `Validating ${done.toLocaleString()} / ${total.toLocaleString()}…`));
 
   if($('ukOnly').checked)
     state.records = state.records.filter(r => r._country === 'GB' || r._status === 'invalid');
@@ -507,58 +539,67 @@ function numberQuality(nsn, country){
   return { q:'ok', reason:'' };
 }
 
-// ── Validate + UK line-type classification ───────────────────────────────
-function classify(records, phoneCol, defCountry, opts={ofcom:true,quality:true}){
-  records.forEach(r=>{
-    const raw = phoneCol ? String(r[phoneCol]??'').trim() : '';
-    r._raw = raw;
-    if(!raw){ r._status='invalid'; r._base='invalid'; r._line='—'; r._reason='Missing'; r._e164=''; r._country=''; return; }
+// ── Validate + UK line-type classification (one record) ───────────────────
+function classifyOne(r, phoneCol, defCountry, opts){
+  const raw = phoneCol ? String(r[phoneCol]??'').trim() : '';
+  r._raw = raw;
+  if(!raw){ r._status='invalid'; r._base='invalid'; r._line='—'; r._reason='Missing'; r._e164=''; r._country=''; return; }
 
-    let p=null;
-    try{ p=libphonenumber.parsePhoneNumber(raw, defCountry); }
-    catch(_){ try{ p=libphonenumber.parsePhoneNumber(raw); }catch(__){} }
+  let p=null;
+  try{ p=libphonenumber.parsePhoneNumber(raw, defCountry); }
+  catch(_){ try{ p=libphonenumber.parsePhoneNumber(raw); }catch(__){} }
 
-    if(!p || !p.isValid()){
-      r._status='invalid'; r._base='invalid'; r._line='—';
-      r._reason = p ? 'Wrong length/area code' : 'Unparseable';
-      r._e164 = raw; r._country='';
-      return;
-    }
+  if(!p || !p.isValid()){
+    r._status='invalid'; r._base='invalid'; r._line='—';
+    r._reason = p ? 'Wrong length/area code' : 'Unparseable';
+    r._e164 = raw; r._country='';
+    return;
+  }
 
-    r._e164 = p.format('E.164');
-    r._country = p.country || defCountry;
-    r._national = p.formatNational();
-    const type = p.getType(); // FIXED_LINE, MOBILE, FIXED_LINE_OR_MOBILE, VOIP, PREMIUM_RATE, TOLL_FREE, ...
+  r._e164 = p.format('E.164');
+  r._country = p.country || defCountry;
+  r._national = p.formatNational();
+  const type = p.getType(); // FIXED_LINE, MOBILE, FIXED_LINE_OR_MOBILE, VOIP, PREMIUM_RATE, TOLL_FREE, ...
 
-    if(type==='FIXED_LINE'){ r._status='landline'; r._line='Landline'; }
-    else if(type==='MOBILE'){ r._status='mobile'; r._line='Mobile'; }
-    else if(type==='FIXED_LINE_OR_MOBILE'){ r._status='landline'; r._line='Fixed/Mobile'; }
-    else if(type==='VOIP'){ r._status='other'; r._line='VoIP'; }
-    else if(type==='PREMIUM_RATE'){ r._status='other'; r._line='Premium'; }
-    else if(type==='TOLL_FREE'){ r._status='other'; r._line='Toll-free'; }
-    else { r._status='other'; r._line=type||'Other'; }
+  if(type==='FIXED_LINE'){ r._status='landline'; r._line='Landline'; }
+  else if(type==='MOBILE'){ r._status='mobile'; r._line='Mobile'; }
+  else if(type==='FIXED_LINE_OR_MOBILE'){ r._status='landline'; r._line='Fixed/Mobile'; }
+  else if(type==='VOIP'){ r._status='other'; r._line='VoIP'; }
+  else if(type==='PREMIUM_RATE'){ r._status='other'; r._line='Premium'; }
+  else if(type==='TOLL_FREE'){ r._status='other'; r._line='Toll-free'; }
+  else { r._status='other'; r._line=type||'Other'; }
 
-    r._reason=''; r._live='';   // live status filled by API later
-    r._area = ukArea(p);        // UK town/region (free, built-in)
+  r._reason=''; r._live='';   // live status filled by API later
+  r._area = ukArea(p);        // UK town/region (free, built-in)
 
-    // Local junk/reserved-range quality check (free, offline) — optional
-    const nsn = p.nationalNumber || '';
-    if(opts.quality){
-      const ql = numberQuality(nsn, r._country);
-      r._quality = ql.q; r._qReason = ql.reason;
-      if(ql.q==='reserved'){ r._status='invalid'; r._line='Reserved'; r._reason=ql.reason; }
-    } else { r._quality='ok'; r._qReason=''; }
+  // Local junk/reserved-range quality check (free, offline) — optional
+  const nsn = p.nationalNumber || '';
+  if(opts.quality){
+    const ql = numberQuality(nsn, r._country);
+    r._quality = ql.q; r._qReason = ql.reason;
+    if(ql.q==='reserved'){ r._status='invalid'; r._line='Reserved'; r._reason=ql.reason; }
+  } else { r._quality='ok'; r._qReason=''; }
 
-    // Ofcom block-allocation + allocated-carrier lookup (free) — optional
-    if(opts.ofcom && r._country === 'GB'){
-      const look = ofcomLookup(p);
-      r._carrier = look.carrier || '';
-      r._alloc = (r._status === 'landline' || r._line === 'Fixed/Mobile') ? look.alloc : 'unknown';
-      if(r._alloc === 'unallocated' && r._status!=='invalid'){ r._status='invalid'; r._line='Unallocated'; r._reason='Block not allocated by Ofcom'; }
-    } else { r._alloc='unknown'; r._carrier=''; }
+  // Ofcom block-allocation + allocated-carrier lookup (free) — optional
+  if(opts.ofcom && r._country === 'GB'){
+    const look = ofcomLookup(p);
+    r._carrier = look.carrier || '';
+    r._alloc = (r._status === 'landline' || r._line === 'Fixed/Mobile') ? look.alloc : 'unknown';
+    if(r._alloc === 'unallocated' && r._status!=='invalid'){ r._status='invalid'; r._line='Unallocated'; r._reason='Block not allocated by Ofcom'; }
+  } else { r._alloc='unknown'; r._carrier=''; }
 
-    r._base = r._status;   // base bucket (landline/mobile/other/invalid) — owned/dup derive from this
-  });
+  r._base = r._status;   // base bucket (landline/mobile/other/invalid) — owned/dup derive from this
+}
+
+// Chunked, non-blocking validation — yields to the UI every few thousand rows so
+// 200k+ row datasets validate with a live progress bar instead of freezing the tab.
+async function classifyChunked(records, phoneCol, defCountry, opts, onProgress){
+  const total = records.length;
+  for(let i=0;i<total;i++){
+    classifyOne(records[i], phoneCol, defCountry, opts);
+    if((i & 4095) === 4095){ if(onProgress) onProgress(i+1, total); await tick(); }
+  }
+  if(onProgress) onProgress(total, total);
 }
 
 // ── Mark leads already in the master list (cross-batch / "already owned") ──
