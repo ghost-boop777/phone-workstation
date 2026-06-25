@@ -33,6 +33,11 @@ service cloud.firestore {
       allow read, write: if allowed();
     }
 
+    // Lead Bank packet index (metadata only; the lead files live in Google Drive).
+    match /packets/{doc} {
+      allow read, write: if allowed();
+    }
+
     // Everything else is denied.
     match /{document=**} {
       allow read, write: if false;

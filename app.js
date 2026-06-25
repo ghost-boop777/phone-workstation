@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-25b';
-console.log('Phone Workstation build', BUILD, '— removed master active-check + client section (scrub engine kept)');
+const BUILD = '2026-06-25c';
+console.log('Phone Workstation build', BUILD, '— + Lead Bank (packets in Google Drive)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -483,7 +483,7 @@ async function runValidation(){
   $('progressWrap').style.display='none';
   $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
   $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false;
-  $('btnToScrub').disabled=false; $('btnReport').disabled=false; updateScrubTargetInfo();
+  $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnSaveBank').disabled=false; updateScrubTargetInfo();
   $('btnTpsApi').disabled = !$('tpsApiUrl').value.trim();
   $('btnProcess').disabled = false;
   state.tab='landline'; setActiveTab('landline');
@@ -1185,6 +1185,104 @@ $('historyDone').addEventListener('click', ()=>$('historyModal').style.display='
 $('historyExport').addEventListener('click', historyExport);
 $('historyModal').addEventListener('click', e=>{ if(e.target===$('historyModal')) $('historyModal').style.display='none'; });
 
+// ── Lead Bank: packets stored as files in Google Drive + shared index in Firestore ──
+const BANK_FOLDER_NAME = 'Phone Workstation — Lead Bank';
+let _bankFolderId = null, _packetRows = [];
+
+async function driveApi(path, opts){
+  const token = await window.ensureDriveToken();
+  let res = await fetch('https://www.googleapis.com/drive/v3/'+path, { ...opts, headers:{ Authorization:'Bearer '+token, ...((opts&&opts.headers)||{}) } });
+  if(res.status===401){ window.clearDriveToken(); const t2=await window.ensureDriveToken();
+    res = await fetch('https://www.googleapis.com/drive/v3/'+path, { ...opts, headers:{ Authorization:'Bearer '+t2, ...((opts&&opts.headers)||{}) } }); }
+  if(!res.ok) throw new Error('Drive HTTP '+res.status);
+  return res.json();
+}
+async function shareWithTeam(fileId){
+  const me = ((firebase.auth().currentUser||{}).email||'').toLowerCase();
+  const team = (typeof ALLOWED_EMAILS!=='undefined'?ALLOWED_EMAILS:[]).filter(e=>e.toLowerCase()!==me);
+  for(const email of team){
+    try{ await driveApi(`files/${fileId}/permissions?sendNotificationEmail=false`, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ role:'writer', type:'user', emailAddress:email }) }); }catch(_){}
+  }
+}
+async function ensureBankFolder(){
+  if(_bankFolderId) return _bankFolderId;
+  const q = encodeURIComponent(`name='${BANK_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const found = await driveApi(`files?q=${q}&fields=files(id,name)`, { method:'GET' });
+  if(found.files && found.files.length){ _bankFolderId=found.files[0].id; return _bankFolderId; }
+  const created = await driveApi('files?fields=id', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ name:BANK_FOLDER_NAME, mimeType:'application/vnd.google-apps.folder' }) });
+  _bankFolderId = created.id;
+  await shareWithTeam(_bankFolderId);
+  return _bankFolderId;
+}
+async function bankSavePacket(){
+  if(!state.records.length) return alert('Run validation first.');
+  if(!_db) return alert('Sign in first.');
+  if(typeof window.ensureDriveToken!=='function') return alert('Drive not available — sign in.');
+  const label = (prompt('Optional label for this packet (e.g. source / batch name):','')||'').trim();
+  let next=1;
+  try{ const snap=await _db.collection('packets').orderBy('packet_no','desc').limit(1).get(); if(!snap.empty) next=(snap.docs[0].data().packet_no||0)+1; }catch(_){}
+  $('btnSaveBank').disabled=true; $('btnSaveBank').textContent='📦 Saving…';
+  try{
+    const keys = Object.keys(state.records[0]).filter(k=>!k.startsWith('_'));
+    const csv = Papa.unparse(state.records.map(r=>{ const o={}; keys.forEach(k=>o[k]=r[k]??''); return o; }));
+    const folderId = await ensureBankFolder();
+    const name = `Packet_${String(next).padStart(4,'0')}${label?'_'+label.replace(/[^\w-]+/g,'_'):''}.csv`;
+    const token = await window.ensureDriveToken();
+    const boundary='pwbank'+Date.now();
+    const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({name, parents:[folderId]})}\r\n--${boundary}\r\nContent-Type: text/csv\r\n\r\n${csv}\r\n--${boundary}--`;
+    const up = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+      method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':`multipart/related; boundary=${boundary}` }, body });
+    if(!up.ok) throw new Error('Drive upload HTTP '+up.status);
+    const file = await up.json();
+    await shareWithTeam(file.id);
+    const r = buildReport();
+    await _db.collection('packets').add({
+      packet_no: next, label: label||'', count: state.records.length,
+      valid: r.fresh+r.owned, invalid: r.invalid, sendable: r.fresh, owned: r.owned, dup: r.dup,
+      driveFileId: file.id, driveLink: file.webViewLink||'', by:(firebase.auth().currentUser||{}).email||'',
+      at: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    const phones = state.records.filter(x=>x._status!=='invalid' && x._e164).map(x=>x._e164);
+    await masterAddBulk(phones);
+    alert(`Saved Packet #${next} (${state.records.length.toLocaleString()} leads) to the Lead Bank, and added ${phones.length.toLocaleString()} numbers to the master scrubber packet.`);
+  }catch(e){ alert('Could not save packet: '+(e.message||e)); }
+  $('btnSaveBank').disabled=false; $('btnSaveBank').textContent='📦 Save to bank';
+}
+async function packetsOpen(){
+  if(!_db) return alert('Sign in to view the Lead Bank.');
+  $('packetsTotal').textContent=''; $('packetsBody').innerHTML='<p class="text-muted" style="padding:12px">Loading…</p>';
+  $('packetsModal').style.display='flex';
+  try{
+    const snap=await _db.collection('packets').orderBy('packet_no','desc').limit(2000).get();
+    const rows=[]; snap.forEach(d=>rows.push(d.data())); _packetRows=rows; renderPackets(rows);
+  }catch(e){ $('packetsBody').innerHTML=`<p class="text-muted" style="padding:12px">Could not load: ${e.message||e}</p>`; }
+}
+function renderPackets(rows){
+  let totalLeads=0; rows.forEach(b=>totalLeads+=(b.count||0));
+  $('packetsTotal').innerHTML=`<b>${rows.length}</b> packet(s) · <b>${totalLeads.toLocaleString()}</b> total leads in the bank`;
+  $('packetsBody').innerHTML = rows.length ? `<table class="hist-table">
+    <thead><tr><th>#</th><th>Label</th><th>Leads</th><th>Valid</th><th>By</th><th>Date</th><th>File</th></tr></thead>
+    <tbody>${rows.map(b=>{
+      const d=b.at&&b.at.toDate?b.at.toDate():null;
+      const link=b.driveLink?`<a href="${b.driveLink}" target="_blank" rel="noopener">Open ↗</a>`:'—';
+      return `<tr><td>${b.packet_no||'—'}</td><td>${b.label||'—'}</td><td>${(b.count||0).toLocaleString()}</td><td>${(b.valid||0).toLocaleString()}</td><td title="${b.by||''}">${(b.by||'').split('@')[0]||'—'}</td><td>${d?d.toLocaleDateString():'—'}</td><td>${link}</td></tr>`;
+    }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No packets yet. Process an upload → 📦 Save to bank.</p>';
+}
+function packetsExport(){
+  if(!_packetRows.length) return alert('No packets.');
+  const out=_packetRows.map(b=>({ packet_no:b.packet_no||'', label:b.label||'', leads:b.count||0, valid:b.valid||0, sendable:b.sendable||0, invalid:b.invalid||0, by:b.by||'', date:(b.at&&b.at.toDate?b.at.toDate().toISOString():''), drive_link:b.driveLink||'' }));
+  const blob=new Blob([Papa.unparse(out)],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='lead_bank_packets.csv'; a.click(); URL.revokeObjectURL(a.href);
+}
+$('btnSaveBank').addEventListener('click', bankSavePacket);
+$('btnPackets').addEventListener('click', packetsOpen);
+$('packetsClose').addEventListener('click', ()=>$('packetsModal').style.display='none');
+$('packetsDone').addEventListener('click', ()=>$('packetsModal').style.display='none');
+$('packetsExport').addEventListener('click', packetsExport);
+$('packetsModal').addEventListener('click', e=>{ if(e.target===$('packetsModal')) $('packetsModal').style.display='none'; });
+
 // ── Self-serve user management (founders/owners only) ──────────────────────
 async function usersOpen(){
   if(!_db) return alert('Sign in first.');
@@ -1235,7 +1333,7 @@ $('btnReset').addEventListener('click',()=>{
   $('pagination').style.display='none';
   $('btnToValidate').disabled=true;
   $('btnExportSafe').disabled=true; $('btnExportLandline').disabled=true; $('btnExportAll').disabled=true; $('btnToScrub').disabled=true;
-  $('btnExportFresh').disabled=true; $('btnMasterAdd').disabled=true; $('btnReport').disabled=true;
+  $('btnExportFresh').disabled=true; $('btnMasterAdd').disabled=true; $('btnReport').disabled=true; $('btnSaveBank').disabled=true;
   $('searchInput').value='';
   // Reset online-scrub state
   scrub.running=false; scrub.counters=null;
@@ -1443,7 +1541,7 @@ $('savedList').addEventListener('click', async e=>{
     state.records=d.records; state.rawRecords=d.records.slice();
     state.records.forEach(r=>{ if(r._base===undefined) r._base=r._status; });
     updateStats(); $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
-    $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false;
+    $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnSaveBank').disabled=false;
     state.tab='landline'; setActiveTab('landline'); renderTable(); showStep(3);
   } else if(del){
     if(confirm('Delete this saved dataset?')){ await dbDel(del.dataset.del); refreshSaved(); }
