@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Founders: hardcoded root admins, always allowed (safe even before any config doc exists).
+    function isFounder() {
+      return request.auth != null && request.auth.token.email in [
+        'helloleads2@gmail.com',
+        'thalableedblue@gmail.com'
+      ];
+    }
+    function cfgExists() { return exists(/databases/$(database)/documents/config/allowlist); }
+    function inAllowlist() {
+      return cfgExists() && request.auth.token.email in get(/databases/$(database)/documents/config/allowlist).data.emails;
+    }
+    // Allowed = a founder, OR a signed-in user added to the self-serve allowlist.
+    function allowed() { return isFounder() || (request.auth != null && inAllowlist()); }
+
+    // Self-serve allowlist: any signed-in user may READ it (to check themselves on login);
+    // only founders may EDIT it.
+    match /config/allowlist {
+      allow read:  if request.auth != null;
+      allow write: if isFounder();
+    }
+
+    // Shared master list (owned numbers), sharded into documents of arrays.
+    match /master/{doc} {
+      allow read, write: if allowed();
+    }
+
+    // Shared batch history (one doc per saved batch: counts, scrub).
+    match /batches/{doc} {
+      allow read, write: if allowed();
+    }
+
+    // Everything else is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
