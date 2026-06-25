@@ -231,6 +231,8 @@
         <button id="btnMasterAdd" class="btn btn-ghost" disabled>➕ Add clean to master</button>
         <button id="btnToScrub" class="btn btn-ghost" disabled>🌐 Online scrub →</button>
         <button id="btnReport" class="btn btn-ghost" disabled>📊 Report</button>
+        <button id="btnSaveBank" class="btn btn-ghost" disabled>📦 Save to bank</button>
+        <button id="btnPackets" class="btn btn-ghost">📦 Packets</button>
         <button id="btnHistory" class="btn btn-ghost">📜 History</button>
         <input id="datasetName" type="text" placeholder="dataset name…" class="search-input" style="max-width:160px" />
         <button id="btnSave" class="btn btn-ghost">💾 Save</button>
@@ -394,6 +396,20 @@
   </div>
 </div>
 
-<script src="app.js?v=20260625b"></script>
+<!-- ══ LEAD BANK PACKETS MODAL ══ -->
+<div id="packetsModal" class="modal-overlay" style="display:none">
+  <div class="modal-card" style="max-width:720px">
+    <button id="packetsClose" class="modal-close" title="Close">✕</button>
+    <h2 class="modal-title">📦 Lead Bank — packets <span class="text-muted" style="font-size:12px;font-weight:400">(in Google Drive)</span></h2>
+    <div id="packetsTotal" class="history-total"></div>
+    <div id="packetsBody" class="history-body"></div>
+    <div class="modal-foot">
+      <button id="packetsExport" class="btn btn-ghost">⬇ Export index (CSV)</button>
+      <button id="packetsDone" class="btn btn-primary">Done</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=20260625c"></script>
 </body>
 </html>
