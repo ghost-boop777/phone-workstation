@@ -4,12 +4,12 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-25a';
-console.log('Phone Workstation build', BUILD, '— + Back-to-upload on Results');
+const BUILD = '2026-06-25b';
+console.log('Phone Workstation build', BUILD, '— removed master active-check + client section (scrub engine kept)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
-  sortCol: null, sortDir: 'asc', page: 1, pageSize: 100, step: 1, client: '',
+  sortCol: null, sortDir: 'asc', page: 1, pageSize: 100, step: 1,
 };
 
 const PHONE_VARIANTS = ['phone','mobile','cell','telephone','tel','number','phone_number',
@@ -470,7 +470,6 @@ async function runValidation(){
 
   showProgress(78,'Checking against master list…'); await tick();
   if($('optMaster').checked) markOwned(state.records);
-  markDelivered(state.records);
 
   showProgress(82,'Removing in-file duplicates…'); await tick();
   if($('dedup').checked) dedup(state.records);
@@ -484,7 +483,7 @@ async function runValidation(){
   $('progressWrap').style.display='none';
   $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
   $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false;
-  $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnDeliver').disabled=false; updateScrubTargetInfo();
+  $('btnToScrub').disabled=false; $('btnReport').disabled=false; updateScrubTargetInfo();
   $('btnTpsApi').disabled = !$('tpsApiUrl').value.trim();
   $('btnProcess').disabled = false;
   state.tab='landline'; setActiveTab('landline');
@@ -690,7 +689,6 @@ function recompute(){
   if(!state.records.length) return;
   state.records.forEach(r=>{ r._status = r._base; if(r._base!=='invalid') r._reason=''; });
   if($('optMaster').checked) markOwned(state.records);
-  markDelivered(state.records);
   if($('dedup').checked)     dedup(state.records);
   applyTps(); updateStats(); renderTable();
 }
@@ -705,7 +703,6 @@ function updateStats(){
   $('sBad').textContent   = c('invalid').toLocaleString();
   $('sDup').textContent   = c('duplicate').toLocaleString();
   $('sOwned').textContent = c('owned').toLocaleString();
-  $('sDelivered').textContent = c('delivered').toLocaleString();
   $('sTps').textContent   = state.records.filter(r=>r._tps).length.toLocaleString();
 }
 
@@ -1097,13 +1094,11 @@ function buildReport(){
 function openReport(){
   if(!state.records.length) return alert('Run validation first.');
   const r=buildReport();
-  const client = state.client ? `<div class="rep-row rep-total"><span>📁 Client</span><b>${state.client}</b></div>` : '';
   const scrub = r.scrubbed
     ? `<div class="rep-sub">live scrub</div>
        <div class="rep-row"><span>✅ Active</span><b>${r.active.toLocaleString()}</b></div>
        <div class="rep-row"><span>❌ Dead</span><b>${r.dead.toLocaleString()}</b></div>` : '';
   $('reportBody').innerHTML = `<div class="rep-grid">
-    ${client}
     <div class="rep-row rep-total"><span>Total records</span><b>${r.total.toLocaleString()}</b></div>
     <div class="rep-row rep-pay"><span>✅ Valid — sendable</span><b>${r.fresh.toLocaleString()}</b></div>
     <div class="rep-sub">excluded</div>
@@ -1118,7 +1113,6 @@ function openReport(){
 function exportReport(){
   const r=buildReport();
   const rows=[['Metric','Value'],
-    ['Client', state.client||''],
     ['Total records', r.total],['Valid (sendable)', r.fresh],
     ['Already in master', r.owned],['In-file duplicates', r.dup],['Invalid', r.invalid],
     ['Excluded total', r.dontPay]];
@@ -1137,7 +1131,6 @@ let _historyRows = [];
 async function batchSave(){
   if(!state.records.length) return alert('Run validation first.');
   if(!_db) return alert('Sign in to save the shared batch history.');
-  if(!state.client && !confirm('No client selected for this batch. Save without a client?')) return;
   const r = buildReport();
   const by = (firebase.auth().currentUser||{}).email || 'unknown';
   const files = [...new Set(state.records.map(x=>x._file).filter(Boolean))];
@@ -1145,7 +1138,6 @@ async function batchSave(){
   try{
     await _db.collection('batches').add({
       at: firebase.firestore.FieldValue.serverTimestamp(), by,
-      client: state.client||'(none)',
       total:r.total, fresh:r.fresh, owned:r.owned, dup:r.dup, invalid:r.invalid,
       active:r.active, dead:r.dead, scrubbed:r.scrubbed, files
     });
@@ -1164,22 +1156,22 @@ async function historyOpen(){
   }catch(e){ $('historyBody').innerHTML = `<p class="text-muted" style="padding:12px">Could not load history: ${e.message||e}</p>`; }
 }
 function renderHistory(rows){
-  let totalFresh=0; const clients={};
-  rows.forEach(b=>{ totalFresh += (b.fresh||0); clients[b.client||'(none)']=true; });
-  $('historyTotal').innerHTML = `<b>${rows.length}</b> batch(es) · <b>${totalFresh.toLocaleString()}</b> valid leads · <b>${Object.keys(clients).length}</b> client(s)`;
+  let totalFresh=0;
+  rows.forEach(b=>{ totalFresh += (b.fresh||0); });
+  $('historyTotal').innerHTML = `<b>${rows.length}</b> batch(es) · <b>${totalFresh.toLocaleString()}</b> valid leads`;
   $('historyBody').innerHTML = rows.length ? `<table class="hist-table">
-    <thead><tr><th>Date</th><th>Client</th><th>By</th><th>Total</th><th>Sendable</th><th>Excluded</th></tr></thead>
+    <thead><tr><th>Date</th><th>By</th><th>Total</th><th>Sendable</th><th>Excluded</th></tr></thead>
     <tbody>${rows.map(b=>{
       const d = b.at && b.at.toDate ? b.at.toDate() : null;
       const excl = (b.owned||0)+(b.dup||0)+(b.invalid||0);
-      return `<tr><td>${d?d.toLocaleString():'—'}</td><td>${b.client||'—'}</td><td title="${b.by||''}">${(b.by||'').split('@')[0]||'—'}</td><td>${(b.total||0).toLocaleString()}</td><td>${(b.fresh||0).toLocaleString()}</td><td>${excl.toLocaleString()}</td></tr>`;
+      return `<tr><td>${d?d.toLocaleString():'—'}</td><td title="${b.by||''}">${(b.by||'').split('@')[0]||'—'}</td><td>${(b.total||0).toLocaleString()}</td><td>${(b.fresh||0).toLocaleString()}</td><td>${excl.toLocaleString()}</td></tr>`;
     }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No batches saved yet. Run a batch → open 📊 Report → 💾 Save to history.</p>';
 }
 function historyExport(){
   if(!_historyRows.length) return alert('No history to export.');
   const out = _historyRows.map(b=>({
     date: b.at && b.at.toDate ? b.at.toDate().toISOString() : '',
-    client: b.client||'', by: b.by||'', total:b.total||0, sendable:b.fresh||0,
+    by: b.by||'', total:b.total||0, sendable:b.fresh||0,
     already_in_master:b.owned||0, in_file_dupes:b.dup||0, invalid:b.invalid||0,
     active:b.active||0, dead:b.dead||0, files:(b.files||[]).join(' | ')
   }));
@@ -1233,89 +1225,6 @@ $('usersAddEmail').addEventListener('keydown', e=>{ if(e.key==='Enter') usersAdd
 $('usersList').addEventListener('click', e=>{ const b=e.target.closest('[data-remove]'); if(b) usersRemove(b.dataset.remove); });
 $('usersModal').addEventListener('click', e=>{ if(e.target===$('usersModal')) $('usersModal').style.display='none'; });
 
-// ── Client list (managed dropdown + free-type) ─────────────────────────────
-let _clients = [];
-async function clientsLoad(){
-  if(!_db) return;
-  try{ const snap=await _db.doc('config/clients').get(); _clients=((snap.exists && snap.data().names)||[]).slice().sort(); }
-  catch(_){ _clients=[]; }
-  renderClients();
-}
-function renderClients(){
-  const sel=$('clientSelect'); if(!sel) return;
-  const cur=state.client||'';
-  sel.innerHTML = '<option value="">— select client —</option>' +
-    _clients.map(c=>`<option value="${c}"${c===cur?' selected':''}>${c}</option>`).join('');
-}
-async function clientAdd(name){
-  name=(name||'').trim();
-  if(!name) return;
-  if(!_clients.some(c=>c.toLowerCase()===name.toLowerCase())){
-    _clients.push(name); _clients.sort();
-    if(_db){ try{ await _db.doc('config/clients').set({ names: firebase.firestore.FieldValue.arrayUnion(name) }, {merge:true}); }
-             catch(e){ $('clientStatus').textContent='Could not save client: '+(e.message||e); } }
-  }
-  renderClients();
-  if($('clientNew')) $('clientNew').value='';
-  selectClient(name);
-}
-function selectClient(name){
-  state.client = name||'';
-  $('clientStatus').textContent = state.client ? `Client: ${state.client}` : '';
-  clientDeliveredLoad(state.client);
-}
-if($('clientSelect')){
-  $('clientSelect').addEventListener('change', e=>selectClient(e.target.value));
-  $('clientAddBtn').addEventListener('click', ()=>clientAdd($('clientNew').value));
-  $('clientNew').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); clientAdd($('clientNew').value); } });
-}
-
-// ── Per-client delivered folders (never re-send a client the same number) ──
-let _deliveredSet = new Set(), _deliveredUnsub = null;
-function clientDeliveredLoad(client){
-  if(_deliveredUnsub){ _deliveredUnsub(); _deliveredUnsub=null; }
-  _deliveredSet = new Set();
-  if(!_db || !client){ deliveredStatus(); if(state.records.length) recompute(); return; }
-  _deliveredUnsub = _db.collection('delivered').where('client','==',client).onSnapshot(snap=>{
-    _deliveredSet = new Set();
-    snap.forEach(d=>(d.data().nums||[]).forEach(e=>_deliveredSet.add(e)));
-    deliveredStatus();
-    if(state.records.length) recompute();
-  }, err=>console.warn('delivered load error', err));
-}
-function deliveredStatus(){
-  if($('clientStatus') && state.client)
-    $('clientStatus').textContent = `Client: ${state.client} · ${_deliveredSet.size.toLocaleString()} already delivered`;
-}
-function markDelivered(records){
-  if(!_deliveredSet.size) return;
-  records.forEach(r=>{
-    if(r._status==='invalid'||!r._e164) return;
-    if(_deliveredSet.has(r._e164)){ r._status='delivered'; r._reason='Already delivered to '+(state.client||'this client'); }
-  });
-}
-async function deliveredAdd(client, e164s){
-  for(let i=0;i<e164s.length;i+=CLOUD_SHARD){
-    const chunk=e164s.slice(i,i+CLOUD_SHARD);
-    try{ await _db.collection('delivered').add({ client, nums:chunk, at: firebase.firestore.FieldValue.serverTimestamp() }); }
-    catch(e){ console.warn('delivered add failed', e); break; }
-  }
-}
-async function deliverToClient(){
-  if(!state.client) return alert('Select a client first (📁 Client panel in Step 1).');
-  if(!_db) return alert('Sign in first.');
-  if(!state.records.length) return alert('Run validation first.');
-  const sendable=[...new Set(state.records.filter(r=>['landline','mobile','other'].includes(r._status)).map(r=>r._e164))]
-    .filter(e=>e && !_deliveredSet.has(e));
-  if(!sendable.length) return alert('No new sendable numbers (all are already delivered, owned, or invalid).');
-  if(!confirm(`Mark ${sendable.length.toLocaleString()} number(s) as delivered to ${state.client}? They'll be excluded from future deliveries to this client.`)) return;
-  $('btnDeliver').disabled=true;
-  await deliveredAdd(state.client, sendable);
-  $('btnDeliver').disabled=false;
-  alert(`Recorded ${sendable.length.toLocaleString()} delivered to ${state.client}.`);
-}
-$('btnDeliver').addEventListener('click', deliverToClient);
-
 $('btnReset').addEventListener('click',()=>{
   Object.assign(state,{files:[],rawRecords:[],records:[],tab:'landline',query:'',sortCol:null,page:1,step:1});
   $('folderInput').value=''; $('fileInput').value=''; $('fileList').innerHTML='';
@@ -1326,7 +1235,7 @@ $('btnReset').addEventListener('click',()=>{
   $('pagination').style.display='none';
   $('btnToValidate').disabled=true;
   $('btnExportSafe').disabled=true; $('btnExportLandline').disabled=true; $('btnExportAll').disabled=true; $('btnToScrub').disabled=true;
-  $('btnExportFresh').disabled=true; $('btnMasterAdd').disabled=true; $('btnReport').disabled=true; $('btnDeliver').disabled=true;
+  $('btnExportFresh').disabled=true; $('btnMasterAdd').disabled=true; $('btnReport').disabled=true;
   $('searchInput').value='';
   // Reset online-scrub state
   scrub.running=false; scrub.counters=null;
@@ -1409,12 +1318,10 @@ let _mrptBusy=false;
 async function masterReportCompute(){
   if(_mrptBusy) return; _mrptBusy=true;
   const arr=[...masterSet];
-  const r={total:arr.length, mobile:0,landline:0,voip:0,other:0,invalid:0, active:0,dead:0,checked:0};
+  const r={total:arr.length, mobile:0,landline:0,voip:0,other:0,invalid:0};
   for(let i=0;i<arr.length;i++){
-    const e=arr[i], c=classifyE164(e);
+    const c=classifyE164(arr[i]);
     if(c==='mobile')r.mobile++; else if(c==='landline')r.landline++; else if(c==='voip')r.voip++; else if(c==='other')r.other++; else r.invalid++;
-    const sc=scrubCacheMap.get(e);
-    if(sc){ r.checked++; if(sc.live==='active')r.active++; else if(sc.live==='dead')r.dead++; }
     if((i & 8191)===8191) await tick();
   }
   r.valid=r.mobile+r.landline+r.voip+r.other;
@@ -1429,62 +1336,14 @@ function renderMasterReport(r){
     <span class="mrep voip">🔵 VoIP<b>${r.voip.toLocaleString()}</b></span>
     <span class="mrep">📱 Mobile<b>${r.mobile.toLocaleString()}</b></span>
     <span class="mrep">☎️ Landline<b>${r.landline.toLocaleString()}</b></span>
-    <span class="mrep active">📶 Active<b>${r.active.toLocaleString()}</b></span>
-    <span class="mrep dead">📵 Dead<b>${r.dead.toLocaleString()}</b></span>
-    <span class="mrep unch">⏳ Unchecked<b>${Math.max(0,r.valid-r.checked).toLocaleString()}</b></span>
   </div>`;
 }
-
-// Active-check ALL master numbers via the bot-worker pool (Step 4 providers/quota/cache).
-const mscrub={ running:false, queue:[], idx:0, call:0, providers:[], throttle:1100, done:0, _auto:false };
-function nextMscrubProvider(){
-  const n=mscrub.providers.length;
-  for(let k=0;k<n;k++){ const p=mscrub.providers[(mscrub.call++)%n]; if(quotaRemaining(p.id)>0) return p; }
-  return null;
-}
-async function masterScrubWorker(){
-  while(mscrub.running){
-    const i=mscrub.idx++; if(i>=mscrub.queue.length) break;
-    const e=mscrub.queue[i];
-    if(scrubCacheMap.has(e)){ mscrub.done++; continue; }
-    const prov=nextMscrubProvider();
-    if(!prov){ mscrub.running=false; $('masterScrubStatus').textContent='Stopped — providers hit their monthly free limit. Add a paid endpoint in Step 4 for more.'; break; }
-    quotaBump(prov.id);
-    const u=prov.url.replace('{number}',encodeURIComponent(e)).replace('{key}',encodeURIComponent(prov.key||''));
-    try{
-      const d=await (await fetch(u)).json();
-      const v=dig(d,prov.field);
-      const active = v===true||v===1||['true','active','yes','1'].includes(String(v).toLowerCase());
-      scrubCachePut(e, active?'active':'dead', prov.name);
-    }catch(_){ /* leave unchecked */ }
-    mscrub.done++;
-    if(mscrub.done%10===0){ $('masterScrubStatus').textContent=`Checking active… ${mscrub.done.toLocaleString()} done`; masterReportCompute(); renderQuota(); }
-    if(mscrub.throttle) await sleep(mscrub.throttle);
-  }
-}
-async function masterScrubAll(){
-  if(mscrub.running){ mscrub.running=false; $('btnMasterCheck').textContent='📶 Check active (all)'; $('masterScrubStatus').textContent='Stopped.'; return; }
-  const providers=buildScrubProviders();
-  if(!providers.length){ $('masterScrubStatus').textContent='Add a provider + API key in Step 4 (Scrub) to check active status.'; return; }
-  const targets=[...masterSet].filter(e=>!scrubCacheMap.has(e) && classifyE164(e)!=='invalid');
-  if(!targets.length){ $('masterScrubStatus').textContent='All valid master numbers already checked.'; return; }
-  const n=Math.max(1,Math.min(8,+($('botCount')?.value)||3));
-  Object.assign(mscrub,{running:true, queue:targets, idx:0, call:0, providers, throttle:Math.max(0,+($('botThrottle')?.value)||1100), done:0});
-  $('btnMasterCheck').textContent='⏹ Stop checking';
-  $('masterScrubStatus').textContent=`Checking ${targets.length.toLocaleString()} number(s)…`;
-  await Promise.all(Array.from({length:n},()=>masterScrubWorker()));
-  mscrub.running=false; $('btnMasterCheck').textContent='📶 Check active (all)';
-  $('masterScrubStatus').textContent=`Done — ${mscrub.done.toLocaleString()} checked this run.`;
-  masterReportCompute();
-}
-if($('btnMasterCheck')) $('btnMasterCheck').addEventListener('click', masterScrubAll);
 
 // ── Shared master list via Firestore (real-time, additive) ────────────────
 // Called once after an allowlisted user signs in (from auth.js → unlock()).
 function masterCloudInit(){
   if(_masterUnsub || typeof firebase==='undefined' || !firebase.firestore) return;
   try{ _db = firebase.firestore(); }catch(_){ _db=null; return; }
-  clientsLoad();                          // populate the client dropdown
   _masterUnsub = _db.collection(MASTER_COL).onSnapshot(snap=>{
     _cloudReady = true;
     masterSet.clear();                    // cloud is the single source of truth
@@ -1492,8 +1351,6 @@ function masterCloudInit(){
     masterStatus();
     masterReportCompute();                // refresh the live master report
     if(state.records.length) recompute();
-    // auto-check active on all numbers (only once, only if a provider is configured)
-    if(!mscrub._auto && masterSet.size && buildScrubProviders().length){ mscrub._auto=true; masterScrubAll(); }
   }, err=>{ console.warn('master cloud sync error', err); });
 }
 // Write numbers up to Firestore in sharded array docs.
@@ -1586,7 +1443,7 @@ $('savedList').addEventListener('click', async e=>{
     state.records=d.records; state.rawRecords=d.records.slice();
     state.records.forEach(r=>{ if(r._base===undefined) r._base=r._status; });
     updateStats(); $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
-    $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnDeliver').disabled=false;
+    $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false;
     state.tab='landline'; setActiveTab('landline'); renderTable(); showStep(3);
   } else if(del){
     if(confirm('Delete this saved dataset?')){ await dbDel(del.dataset.del); refreshSaved(); }

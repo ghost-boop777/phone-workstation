@@ -80,30 +80,17 @@
           <ul id="fileList" class="file-list"></ul>
         </div>
 
-        <div class="panel" id="clientPanel">
-          <h3 class="panel-title">📁 Client <span class="text-muted" style="text-transform:none;font-weight:400">— this data is for</span></h3>
-          <p class="panel-hint">Tag every upload with the client it's going to. Pick a saved client, or type a new one (it's saved for next time).</p>
-          <div class="client-row">
-            <select id="clientSelect"><option value="">— select client —</option></select>
-            <input id="clientNew" type="text" placeholder="or type a new client…" />
-            <button id="clientAddBtn" class="btn btn-ghost btn-sm" type="button">+ Add</button>
-          </div>
-          <div id="clientStatus" class="live-progress"></div>
-        </div>
-
         <div class="panel" id="masterPanel">
-          <h3 class="panel-title">📇 Master — numbers you own <span id="masterCount" class="badge">0</span></h3>
-          <p class="panel-hint">Your whole owned repository (shared cloud). Imports dedupe across
-            <strong>every column</strong>. The live report below validates all numbers; “Check active”
-            checks them online.</p>
+          <h3 class="panel-title">📇 Master scrubber packet <span id="masterCount" class="badge">0</span></h3>
+          <p class="panel-hint">Your whole owned repository (shared cloud). Every new upload is scrubbed
+            (deduped) against this. Imports dedupe across <strong>every column</strong>; the live report
+            below validates all numbers offline.</p>
           <div class="sup-row">
             <label class="btn btn-ghost">⬆ Import owned numbers<input type="file" id="masterImport" accept=".csv,.txt,.xls,.xlsx" hidden /></label>
-            <button id="btnMasterCheck" class="btn btn-ghost">📶 Check active (all)</button>
             <button id="btnMasterClear" class="btn btn-ghost">🗑 Clear</button>
           </div>
           <div id="masterReport" class="master-report"></div>
           <div id="masterStatus" class="live-progress">No master numbers yet. Import the numbers you own.</div>
-          <div id="masterScrubStatus" class="live-progress"></div>
         </div>
 
         <div class="panel" id="savedPanel">
@@ -192,8 +179,7 @@
       <div class="panel mt-12">
         <h3 class="panel-title">Suppression (optional, compliance)</h3>
         <p class="panel-hint">Load <strong>TPS</strong> (consumer) / <strong>CTPS</strong> (corporate)
-          lists you've licensed. Lists stay in your browser. <em>Offline only</em> — the online
-          TPS-API and live-status checks now live in <strong>Step 4 · Scrub</strong>.</p>
+          lists you've licensed. Matched locally in your browser — <em>offline only</em>.</p>
         <div class="sup-row">
           <label class="btn btn-ghost">📋 TPS file<input type="file" id="tpsInput" accept=".csv,.txt" hidden /></label>
           <label class="btn btn-ghost">🏢 CTPS file<input type="file" id="ctpsInput" accept=".csv,.txt" hidden /></label>
@@ -226,7 +212,6 @@
       <div class="stat-card stat-bad"><div class="stat-val" id="sBad">0</div><div class="stat-lbl">❌ Invalid</div></div>
       <div class="stat-card stat-dup"><div class="stat-val" id="sDup">0</div><div class="stat-lbl">🔁 In-file dupes</div></div>
       <div class="stat-card stat-owned"><div class="stat-val" id="sOwned">0</div><div class="stat-lbl">📇 Already owned</div></div>
-      <div class="stat-card stat-delivered"><div class="stat-val" id="sDelivered">0</div><div class="stat-lbl">📤 Delivered</div></div>
       <div class="stat-card stat-tps"><div class="stat-val" id="sTps">0</div><div class="stat-lbl">🚫 TPS</div></div>
     </div>
 
@@ -238,7 +223,6 @@
         <button class="tab" data-tab="invalid">❌ Invalid</button>
         <button class="tab" data-tab="duplicate">🔁 In-file dupes</button>
         <button class="tab" data-tab="owned">📇 Already owned</button>
-        <button class="tab" data-tab="delivered">📤 Delivered</button>
         <button class="tab" data-tab="tps">🚫 TPS</button>
         <button class="tab" data-tab="all">📋 All</button>
       </div>
@@ -246,7 +230,6 @@
         <button id="btnExportFresh" class="btn btn-primary" disabled>⬇ Fresh leads only</button>
         <button id="btnMasterAdd" class="btn btn-ghost" disabled>➕ Add clean to master</button>
         <button id="btnToScrub" class="btn btn-ghost" disabled>🌐 Online scrub →</button>
-        <button id="btnDeliver" class="btn btn-ghost" disabled>📤 Mark delivered</button>
         <button id="btnReport" class="btn btn-ghost" disabled>📊 Report</button>
         <button id="btnHistory" class="btn btn-ghost">📜 History</button>
         <input id="datasetName" type="text" placeholder="dataset name…" class="search-input" style="max-width:160px" />
@@ -364,6 +347,7 @@
       </div>
     </div>
   </section>
+
 </main>
 
 <!-- ══ BATCH REPORT MODAL ══ -->
@@ -410,6 +394,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20260625a"></script>
+<script src="app.js?v=20260625b"></script>
 </body>
 </html>
