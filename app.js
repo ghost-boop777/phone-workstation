@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-25d';
-console.log('Phone Workstation build', BUILD, '— auto-add validated numbers to master');
+const BUILD = '2026-06-25e';
+console.log('Phone Workstation build', BUILD, '— hardening + Lead Bank search + master export + dashboard totals');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -16,6 +16,10 @@ const PHONE_VARIANTS = ['phone','mobile','cell','telephone','tel','number','phon
   'mobile_number','contact','msisdn','phonenumber','landline','telephonenumber','tel_no','telno'];
 
 const $ = id => document.getElementById(id);
+
+// Escape any user-supplied string before interpolating into innerHTML.
+const _ESC = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' };
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>_ESC[c]);
 
 // ── UK area code → town/region (built-in, free, no download) ──────────────
 // Keyed by national-prefix digits (no leading 0). Matched longest-first.
@@ -1176,15 +1180,25 @@ async function historyOpen(){
   }catch(e){ $('historyBody').innerHTML = `<p class="text-muted" style="padding:12px">Could not load history: ${e.message||e}</p>`; }
 }
 function renderHistory(rows){
-  let totalFresh=0;
-  rows.forEach(b=>{ totalFresh += (b.fresh||0); });
-  $('historyTotal').innerHTML = `<b>${rows.length}</b> batch(es) · <b>${totalFresh.toLocaleString()}</b> valid leads`;
+  const now=Date.now();
+  const wkMs=7*86400000, moMs=30*86400000;
+  let totalFresh=0, weekFresh=0, monthFresh=0;
+  rows.forEach(b=>{
+    const f=(b.fresh||0); totalFresh+=f;
+    const t = b.at && b.at.toDate ? b.at.toDate().getTime() : 0;
+    if(t && (now-t) <= wkMs) weekFresh += f;
+    if(t && (now-t) <= moMs) monthFresh += f;
+  });
+  $('historyTotal').innerHTML = `<b>${rows.length}</b> batch(es) · ` +
+    `this week <b>${weekFresh.toLocaleString()}</b> · ` +
+    `this month <b>${monthFresh.toLocaleString()}</b> · ` +
+    `all time <b>${totalFresh.toLocaleString()}</b> valid leads`;
   $('historyBody').innerHTML = rows.length ? `<table class="hist-table">
     <thead><tr><th>Date</th><th>By</th><th>Total</th><th>Sendable</th><th>Excluded</th></tr></thead>
     <tbody>${rows.map(b=>{
       const d = b.at && b.at.toDate ? b.at.toDate() : null;
       const excl = (b.owned||0)+(b.dup||0)+(b.invalid||0);
-      return `<tr><td>${d?d.toLocaleString():'—'}</td><td title="${b.by||''}">${(b.by||'').split('@')[0]||'—'}</td><td>${(b.total||0).toLocaleString()}</td><td>${(b.fresh||0).toLocaleString()}</td><td>${excl.toLocaleString()}</td></tr>`;
+      return `<tr><td>${d?d.toLocaleString():'—'}</td><td title="${esc(b.by)}">${esc((b.by||'').split('@')[0])||'—'}</td><td>${(b.total||0).toLocaleString()}</td><td>${(b.fresh||0).toLocaleString()}</td><td>${excl.toLocaleString()}</td></tr>`;
     }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No batches saved yet. Run a batch → open 📊 Report → 💾 Save to history.</p>';
 }
 function historyExport(){
@@ -1217,13 +1231,17 @@ async function driveApi(path, opts){
   if(!res.ok) throw new Error('Drive HTTP '+res.status);
   return res.json();
 }
+// Returns the list of teammates we COULDN'T share with (empty = full success).
 async function shareWithTeam(fileId){
   const me = ((firebase.auth().currentUser||{}).email||'').toLowerCase();
   const team = (typeof ALLOWED_EMAILS!=='undefined'?ALLOWED_EMAILS:[]).filter(e=>e.toLowerCase()!==me);
+  const failed=[];
   for(const email of team){
     try{ await driveApi(`files/${fileId}/permissions?sendNotificationEmail=false`, { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ role:'writer', type:'user', emailAddress:email }) }); }catch(_){}
+      body: JSON.stringify({ role:'writer', type:'user', emailAddress:email }) }); }
+    catch(e){ console.warn('share failed for', email, e); failed.push(email); }
   }
+  return failed;
 }
 async function ensureBankFolder(){
   if(_bankFolderId) return _bankFolderId;
@@ -1233,7 +1251,7 @@ async function ensureBankFolder(){
   const created = await driveApi('files?fields=id', { method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ name:BANK_FOLDER_NAME, mimeType:'application/vnd.google-apps.folder' }) });
   _bankFolderId = created.id;
-  await shareWithTeam(_bankFolderId);
+  await shareWithTeam(_bankFolderId);   // best-effort; per-file share also runs later
   return _bankFolderId;
 }
 async function bankSavePacket(){
@@ -1256,7 +1274,7 @@ async function bankSavePacket(){
       method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':`multipart/related; boundary=${boundary}` }, body });
     if(!up.ok) throw new Error('Drive upload HTTP '+up.status);
     const file = await up.json();
-    await shareWithTeam(file.id);
+    const shareFailed = await shareWithTeam(file.id);
     const r = buildReport();
     await _db.collection('packets').add({
       packet_no: next, label: label||'', count: state.records.length,
@@ -1266,13 +1284,17 @@ async function bankSavePacket(){
     });
     const phones = state.records.filter(x=>x._status!=='invalid' && x._e164).map(x=>x._e164);
     await masterAddBulk(phones);
-    alert(`Saved Packet #${next} (${state.records.length.toLocaleString()} leads) to the Lead Bank, and added ${phones.length.toLocaleString()} numbers to the master scrubber packet.`);
+    const shareNote = shareFailed.length
+      ? `\n\n⚠ Could not share with: ${shareFailed.join(', ')}. Please share the file manually from your Drive.`
+      : '';
+    alert(`Saved Packet #${next} (${state.records.length.toLocaleString()} leads) to the Lead Bank, and added ${phones.length.toLocaleString()} numbers to the master scrubber packet.${shareNote}`);
   }catch(e){ alert('Could not save packet: '+(e.message||e)); }
   $('btnSaveBank').disabled=false; $('btnSaveBank').textContent='📦 Save to bank';
 }
 async function packetsOpen(){
   if(!_db) return alert('Sign in to view the Lead Bank.');
   $('packetsTotal').textContent=''; $('packetsBody').innerHTML='<p class="text-muted" style="padding:12px">Loading…</p>';
+  $('packetsSearch').value='';
   $('packetsModal').style.display='flex';
   try{
     const snap=await _db.collection('packets').orderBy('packet_no','desc').limit(2000).get();
@@ -1286,8 +1308,8 @@ function renderPackets(rows){
     <thead><tr><th>#</th><th>Label</th><th>Leads</th><th>Valid</th><th>By</th><th>Date</th><th>File</th></tr></thead>
     <tbody>${rows.map(b=>{
       const d=b.at&&b.at.toDate?b.at.toDate():null;
-      const link=b.driveLink?`<a href="${b.driveLink}" target="_blank" rel="noopener">Open ↗</a>`:'—';
-      return `<tr><td>${b.packet_no||'—'}</td><td>${b.label||'—'}</td><td>${(b.count||0).toLocaleString()}</td><td>${(b.valid||0).toLocaleString()}</td><td title="${b.by||''}">${(b.by||'').split('@')[0]||'—'}</td><td>${d?d.toLocaleDateString():'—'}</td><td>${link}</td></tr>`;
+      const link=b.driveLink?`<a href="${esc(b.driveLink)}" target="_blank" rel="noopener">Open ↗</a>`:'—';
+      return `<tr><td>${b.packet_no||'—'}</td><td>${esc(b.label)||'—'}</td><td>${(b.count||0).toLocaleString()}</td><td>${(b.valid||0).toLocaleString()}</td><td title="${esc(b.by)}">${esc((b.by||'').split('@')[0])||'—'}</td><td>${d?d.toLocaleDateString():'—'}</td><td>${link}</td></tr>`;
     }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No packets yet. Process an upload → 📦 Save to bank.</p>';
 }
 function packetsExport(){
@@ -1302,6 +1324,20 @@ $('packetsClose').addEventListener('click', ()=>$('packetsModal').style.display=
 $('packetsDone').addEventListener('click', ()=>$('packetsModal').style.display='none');
 $('packetsExport').addEventListener('click', packetsExport);
 $('packetsModal').addEventListener('click', e=>{ if(e.target===$('packetsModal')) $('packetsModal').style.display='none'; });
+// Live search across packet #, label, uploader email.
+let _packetSearchT;
+$('packetsSearch').addEventListener('input', e=>{
+  clearTimeout(_packetSearchT);
+  _packetSearchT = setTimeout(()=>{
+    const q = e.target.value.trim().toLowerCase();
+    const filtered = q ? _packetRows.filter(b =>
+      String(b.packet_no||'').includes(q) ||
+      String(b.label||'').toLowerCase().includes(q) ||
+      String(b.by||'').toLowerCase().includes(q)
+    ) : _packetRows;
+    renderPackets(filtered);
+  }, 120);
+});
 
 // ── Self-serve user management (founders/owners only) ──────────────────────
 async function usersOpen(){
@@ -1316,7 +1352,7 @@ async function usersRender(){
   const founders=(typeof ALLOWED_EMAILS!=='undefined'?ALLOWED_EMAILS:[]).map(e=>e.toLowerCase());
   const extra=added.map(e=>String(e).toLowerCase()).filter(e=>!founders.includes(e));
   const rows=[...founders.map(e=>({email:e,owner:true})), ...extra.map(e=>({email:e,owner:false}))];
-  $('usersList').innerHTML=rows.map(u=>`<li class="user-row"><span>${u.email}${u.owner?'<span class="user-tag">owner</span>':''}</span>${u.owner?'':`<button class="btn btn-ghost btn-sm" data-remove="${u.email}">Remove</button>`}</li>`).join('');
+  $('usersList').innerHTML=rows.map(u=>`<li class="user-row"><span>${esc(u.email)}${u.owner?'<span class="user-tag">owner</span>':''}</span>${u.owner?'':`<button class="btn btn-ghost btn-sm" data-remove="${esc(u.email)}">Remove</button>`}</li>`).join('');
 }
 async function usersAdd(){
   const email=($('usersAddEmail').value||'').trim().toLowerCase();
@@ -1531,6 +1567,23 @@ $('btnMasterClear').addEventListener('click', async ()=>{
   if(!confirm(`Clear all ${masterSet.size.toLocaleString()} owned numbers from the master list?`)) return;
   await masterClearAll();
   recompute();
+});
+
+// Streaming export of the whole master scrubber as CSV (doesn't freeze on 168k+ rows).
+$('btnMasterExport').addEventListener('click', async ()=>{
+  if(!masterSet.size) return alert('Master is empty — nothing to export.');
+  $('masterStatus').textContent = `Preparing CSV (${masterSet.size.toLocaleString()} numbers)…`;
+  await tick();
+  const parts = ['e164\n'];
+  let i = 0;
+  for(const e of masterSet){
+    parts.push(e); parts.push('\n');
+    if((++i & 16383)===0) await tick();      // yield to UI every ~16k rows
+  }
+  const blob = new Blob(parts, {type:'text/csv;charset=utf-8;'});
+  const name = `master_scrubber_${new Date().toISOString().slice(0,10)}_${masterSet.size}.csv`;
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href);
+  $('masterStatus').textContent = `Exported ${masterSet.size.toLocaleString()} number(s) to ${name}.`;
 });
 masterLoad();
 
