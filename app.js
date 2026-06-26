@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-25c';
-console.log('Phone Workstation build', BUILD, '— + Lead Bank (packets in Google Drive)');
+const BUILD = '2026-06-25d';
+console.log('Phone Workstation build', BUILD, '— auto-add validated numbers to master');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -477,7 +477,27 @@ async function runValidation(){
   showProgress(92,'Checking suppression…'); await tick();
   applyTps();
 
+  // Auto-store every newly-valid number in the master scrubber packet, so the
+  // next upload is deduped against everything we've ever validated. Skips
+  // numbers that were already owned (no work), in-file duplicates, or invalid.
+  showProgress(96,'Updating master scrubber…'); await tick();
+  const fresh = [...new Set(state.records
+    .filter(r => r._e164 && ['landline','mobile','other'].includes(r._status))
+    .map(r => r._e164))];
+  let _autoAdded = 0;
+  if(fresh.length){
+    try{ _autoAdded = await masterAddBulk(fresh); }
+    catch(e){ console.warn('master auto-add failed', e); }
+  }
+
   showProgress(100,'Done'); await tick();
+
+  // Surface the auto-add result + refresh the master badge/report.
+  if($('masterCount')) $('masterCount').textContent = masterSet.size.toLocaleString();
+  masterReportCompute();
+  if(_autoAdded > 0 && $('masterStatus')){
+    $('masterStatus').textContent = `+${_autoAdded.toLocaleString()} added from this batch · master now ${masterSet.size.toLocaleString()}${_cloudReady?' · ☁ shared':''}.`;
+  }
 
   updateStats();
   $('progressWrap').style.display='none';
