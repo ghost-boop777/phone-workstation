@@ -87,6 +87,7 @@
             below validates all numbers offline.</p>
           <div class="sup-row">
             <label class="btn btn-ghost">⬆ Import owned numbers<input type="file" id="masterImport" accept=".csv,.txt,.xls,.xlsx" hidden /></label>
+            <button id="btnMasterExport" class="btn btn-ghost">⬇ Export master (CSV)</button>
             <button id="btnMasterClear" class="btn btn-ghost">🗑 Clear</button>
           </div>
           <div id="masterReport" class="master-report"></div>
@@ -402,6 +403,7 @@
     <button id="packetsClose" class="modal-close" title="Close">✕</button>
     <h2 class="modal-title">📦 Lead Bank — packets <span class="text-muted" style="font-size:12px;font-weight:400">(in Google Drive)</span></h2>
     <div id="packetsTotal" class="history-total"></div>
+    <input id="packetsSearch" type="text" placeholder="🔍 Search by packet #, label or uploader…" class="search-input" style="margin-bottom:10px" />
     <div id="packetsBody" class="history-body"></div>
     <div class="modal-foot">
       <button id="packetsExport" class="btn btn-ghost">⬇ Export index (CSV)</button>
@@ -410,6 +412,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20260625d"></script>
+<script src="app.js?v=20260625e"></script>
 </body>
 </html>
