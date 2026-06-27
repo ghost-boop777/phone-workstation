@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-25e';
-console.log('Phone Workstation build', BUILD, '— hardening + Lead Bank search + master export + dashboard totals');
+const BUILD = '2026-06-26a';
+console.log('Phone Workstation build', BUILD, '— fix: validation no longer auto-adds to master');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -448,6 +448,7 @@ $('btnProcess').addEventListener('click', runValidation);
 
 async function runValidation(){
   if(!state.rawRecords.length) return;
+  justSavedToMaster.clear();              // new batch — drop any per-session protections
   $('btnProcess').disabled = true;
   showStep(3);
   $('progressWrap').style.display = '';
@@ -481,27 +482,13 @@ async function runValidation(){
   showProgress(92,'Checking suppression…'); await tick();
   applyTps();
 
-  // Auto-store every newly-valid number in the master scrubber packet, so the
-  // next upload is deduped against everything we've ever validated. Skips
-  // numbers that were already owned (no work), in-file duplicates, or invalid.
-  showProgress(96,'Updating master scrubber…'); await tick();
-  const fresh = [...new Set(state.records
-    .filter(r => r._e164 && ['landline','mobile','other'].includes(r._status))
-    .map(r => r._e164))];
-  let _autoAdded = 0;
-  if(fresh.length){
-    try{ _autoAdded = await masterAddBulk(fresh); }
-    catch(e){ console.warn('master auto-add failed', e); }
-  }
-
   showProgress(100,'Done'); await tick();
 
-  // Surface the auto-add result + refresh the master badge/report.
+  // Master is NOT touched by validation. It only grows when the user explicitly
+  // commits (📦 Save to bank or ➕ Add clean to master). This prevents the
+  // fresh-numbers-flipping-to-owned regression where the cloud snapshot fed
+  // them back through markOwned during recompute.
   if($('masterCount')) $('masterCount').textContent = masterSet.size.toLocaleString();
-  masterReportCompute();
-  if(_autoAdded > 0 && $('masterStatus')){
-    $('masterStatus').textContent = `+${_autoAdded.toLocaleString()} added from this batch · master now ${masterSet.size.toLocaleString()}${_cloudReady?' · ☁ shared':''}.`;
-  }
 
   updateStats();
   $('progressWrap').style.display='none';
@@ -709,10 +696,22 @@ function dedup(records){
 
 // ── Re-derive owned/duplicate buckets from the base classification ────────
 // Used when the master list changes while results are already on screen.
+// `justSavedToMaster` is the set of E.164 numbers the user just committed in
+// THIS session — they must keep their sendable status, not flip back to "owned"
+// when the cloud snapshot of master loops back in.
+const justSavedToMaster = new Set();
 function recompute(){
   if(!state.records.length) return;
   state.records.forEach(r=>{ r._status = r._base; if(r._base!=='invalid') r._reason=''; });
   if($('optMaster').checked) markOwned(state.records);
+  // Restore sendable status for numbers committed in this session.
+  if(justSavedToMaster.size){
+    state.records.forEach(r=>{
+      if(r._status==='owned' && r._e164 && justSavedToMaster.has(r._e164)){
+        r._status = r._base; r._reason = '';
+      }
+    });
+  }
   if($('dedup').checked)     dedup(state.records);
   applyTps(); updateStats(); renderTable();
 }
@@ -1034,6 +1033,8 @@ $('btnExportFresh').addEventListener('click',()=>{
 $('btnMasterAdd').addEventListener('click', async ()=>{
   const e164s = state.records.filter(r=>r._status!=='invalid' && r._e164).map(r=>r._e164);
   if(!e164s.length) return alert('No valid numbers to add.');
+  // Remember these so the cloud snapshot doesn't flip them back to "owned" on screen.
+  e164s.forEach(e=>justSavedToMaster.add(e));
   const added = await masterAddBulk(e164s);
   recompute();
   alert(`Added ${added.toLocaleString()} new number(s) to your master list. It now holds ${masterSet.size.toLocaleString()}.`);
@@ -1283,6 +1284,7 @@ async function bankSavePacket(){
       at: firebase.firestore.FieldValue.serverTimestamp()
     });
     const phones = state.records.filter(x=>x._status!=='invalid' && x._e164).map(x=>x._e164);
+    phones.forEach(e=>justSavedToMaster.add(e));   // protect from owned-flip on cloud snapshot
     await masterAddBulk(phones);
     const shareNote = shareFailed.length
       ? `\n\n⚠ Could not share with: ${shareFailed.join(', ')}. Please share the file manually from your Drive.`
@@ -1381,6 +1383,7 @@ $('usersModal').addEventListener('click', e=>{ if(e.target===$('usersModal')) $(
 
 $('btnReset').addEventListener('click',()=>{
   Object.assign(state,{files:[],rawRecords:[],records:[],tab:'landline',query:'',sortCol:null,page:1,step:1});
+  justSavedToMaster.clear();
   $('folderInput').value=''; $('fileInput').value=''; $('fileList').innerHTML='';
   $('fileListPanel').style.display='none';
   $('rawEmpty').style.display=''; $('rawTable').style.display='none';
