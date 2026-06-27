@@ -23,6 +23,11 @@ service cloud.firestore {
       allow write: if isFounder();
     }
 
+    // Race-safe packet number counter — incremented in a transaction.
+    match /config/packet_counter {
+      allow read, write: if allowed();
+    }
+
     // Shared master list (owned numbers), sharded into documents of arrays.
     match /master/{doc} {
       allow read, write: if allowed();

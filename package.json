@@ -1,0 +1,12 @@
+{
+  "name": "phone-workstation-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:deps": "npm install --workspaces=false",
+    "test": "node --test tests/core.test.js"
+  },
+  "devDependencies": {
+    "libphonenumber-js": "1.11.4"
+  }
+}

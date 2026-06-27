@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-26a';
-console.log('Phone Workstation build', BUILD, '— fix: validation no longer auto-adds to master');
+const BUILD = '2026-06-27a';
+console.log('Phone Workstation build', BUILD, '— master search/remove + packet detail + lazy folder + txn counter + tests');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1255,17 +1255,37 @@ async function ensureBankFolder(){
   await shareWithTeam(_bankFolderId);   // best-effort; per-file share also runs later
   return _bankFolderId;
 }
+// Race-safe next packet number via a Firestore transaction on a counter doc.
+async function reservePacketNo(){
+  const ref = _db.collection('config').doc('packet_counter');
+  return _db.runTransaction(async tx => {
+    const doc = await tx.get(ref);
+    const cur = (doc.exists ? (doc.data().next||0) : 0);
+    const next = cur + 1;
+    tx.set(ref, { next, updated: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+    return next;
+  });
+}
+
 async function bankSavePacket(){
   if(!state.records.length) return alert('Run validation first.');
   if(!_db) return alert('Sign in first.');
   if(typeof window.ensureDriveToken!=='function') return alert('Drive not available — sign in.');
   const label = (prompt('Optional label for this packet (e.g. source / batch name):','')||'').trim();
-  let next=1;
-  try{ const snap=await _db.collection('packets').orderBy('packet_no','desc').limit(1).get(); if(!snap.empty) next=(snap.docs[0].data().packet_no||0)+1; }catch(_){}
   $('btnSaveBank').disabled=true; $('btnSaveBank').textContent='📦 Saving…';
   try{
+    // 1) Build CSV first (so we never create a Drive folder if our own data prep fails).
     const keys = Object.keys(state.records[0]).filter(k=>!k.startsWith('_'));
     const csv = Papa.unparse(state.records.map(r=>{ const o={}; keys.forEach(k=>o[k]=r[k]??''); return o; }));
+    // 2) Lazy-create folder + reserve packet number ONLY now (no orphan folder if CSV failed).
+    let next;
+    try{ next = await reservePacketNo(); }
+    catch(e){
+      // Fallback if transaction unavailable: still descending-order, but warn.
+      console.warn('packet_no transaction failed; falling back', e);
+      const snap=await _db.collection('packets').orderBy('packet_no','desc').limit(1).get();
+      next = snap.empty ? 1 : (snap.docs[0].data().packet_no||0)+1;
+    }
     const folderId = await ensureBankFolder();
     const name = `Packet_${String(next).padStart(4,'0')}${label?'_'+label.replace(/[^\w-]+/g,'_'):''}.csv`;
     const token = await window.ensureDriveToken();
@@ -1308,12 +1328,47 @@ function renderPackets(rows){
   $('packetsTotal').innerHTML=`<b>${rows.length}</b> packet(s) · <b>${totalLeads.toLocaleString()}</b> total leads in the bank`;
   $('packetsBody').innerHTML = rows.length ? `<table class="hist-table">
     <thead><tr><th>#</th><th>Label</th><th>Leads</th><th>Valid</th><th>By</th><th>Date</th><th>File</th></tr></thead>
-    <tbody>${rows.map(b=>{
+    <tbody>${rows.map((b,i)=>{
       const d=b.at&&b.at.toDate?b.at.toDate():null;
-      const link=b.driveLink?`<a href="${esc(b.driveLink)}" target="_blank" rel="noopener">Open ↗</a>`:'—';
-      return `<tr><td>${b.packet_no||'—'}</td><td>${esc(b.label)||'—'}</td><td>${(b.count||0).toLocaleString()}</td><td>${(b.valid||0).toLocaleString()}</td><td title="${esc(b.by)}">${esc((b.by||'').split('@')[0])||'—'}</td><td>${d?d.toLocaleDateString():'—'}</td><td>${link}</td></tr>`;
+      const link=b.driveLink?`<a href="${esc(b.driveLink)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Open ↗</a>`:'—';
+      return `<tr data-pkt="${i}" style="cursor:pointer"><td>${b.packet_no||'—'}</td><td>${esc(b.label)||'—'}</td><td>${(b.count||0).toLocaleString()}</td><td>${(b.valid||0).toLocaleString()}</td><td title="${esc(b.by)}">${esc((b.by||'').split('@')[0])||'—'}</td><td>${d?d.toLocaleDateString():'—'}</td><td>${link}</td></tr>`;
     }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No packets yet. Process an upload → 📦 Save to bank.</p>';
 }
+
+// Click a row → drill into that packet's full breakdown.
+function renderPacketDetail(b){
+  const d = b.at && b.at.toDate ? b.at.toDate() : null;
+  const excl = (b.owned||0)+(b.dup||0)+(b.invalid||0);
+  const link = b.driveLink ? `<a href="${esc(b.driveLink)}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">📂 Open in Drive</a>` : '<span class="text-muted">No Drive link</span>';
+  const scrub = (b.scrubbed) ? `
+    <div class="rep-sub">live scrub</div>
+    <div class="rep-row"><span>Scrubbed</span><b>${(b.scrubbed||0).toLocaleString()}</b></div>
+    <div class="rep-row"><span>✅ Active</span><b>${(b.active||0).toLocaleString()}</b></div>
+    <div class="rep-row"><span>❌ Dead</span><b>${(b.dead||0).toLocaleString()}</b></div>` : '';
+  $('packetsBody').innerHTML = `
+    <button id="packetBack" class="btn btn-ghost btn-sm" style="margin-bottom:10px" type="button">← Back to packets</button>
+    <div class="rep-grid">
+      <div class="rep-row rep-total"><span>📦 Packet #</span><b>${b.packet_no||'—'}</b></div>
+      <div class="rep-row rep-total"><span>Label</span><b>${esc(b.label)||'—'}</b></div>
+      <div class="rep-row rep-total"><span>Uploaded by</span><b>${esc(b.by)||'—'}</b></div>
+      <div class="rep-row rep-total"><span>Date</span><b>${d?d.toLocaleString():'—'}</b></div>
+      <div class="rep-row"><span>Total leads</span><b>${(b.count||0).toLocaleString()}</b></div>
+      <div class="rep-row rep-pay"><span>✅ Valid (sendable)</span><b>${(b.sendable||b.fresh||0).toLocaleString()}</b></div>
+      <div class="rep-sub">excluded</div>
+      <div class="rep-row"><span>📇 Already in master</span><b>${(b.owned||0).toLocaleString()}</b></div>
+      <div class="rep-row"><span>🔁 In-file duplicates</span><b>${(b.dup||0).toLocaleString()}</b></div>
+      <div class="rep-row"><span>❌ Invalid</span><b>${(b.invalid||0).toLocaleString()}</b></div>
+      <div class="rep-row"><span>Excluded total</span><b>${excl.toLocaleString()}</b></div>
+      ${scrub}
+    </div>
+    <div style="margin-top:14px;text-align:center">${link}</div>`;
+  $('packetBack').addEventListener('click', ()=>renderPackets(_packetRows));
+}
+$('packetsBody').addEventListener('click', e=>{
+  const tr = e.target.closest('[data-pkt]'); if(!tr) return;
+  const idx = +tr.dataset.pkt;
+  if(_packetRows[idx]) renderPacketDetail(_packetRows[idx]);
+});
 function packetsExport(){
   if(!_packetRows.length) return alert('No packets.');
   const out=_packetRows.map(b=>({ packet_no:b.packet_no||'', label:b.label||'', leads:b.count||0, valid:b.valid||0, sendable:b.sendable||0, invalid:b.invalid||0, by:b.by||'', date:(b.at&&b.at.toDate?b.at.toDate().toISOString():''), drive_link:b.driveLink||'' }));
@@ -1532,6 +1587,21 @@ async function masterCloudClear(){
   }catch(e){ console.warn('master cloud clear failed', e); }
 }
 
+// Surgically remove ONE number from the sharded master cloud. Walks every shard
+// and uses arrayRemove on the ones that contain it.
+async function masterCloudRemove(e164){
+  if(!_db || !e164) return;
+  try{
+    const snap=await _db.collection(MASTER_COL).get();
+    for(const d of snap.docs){
+      const nums=d.data().nums||[];
+      if(nums.includes(e164)){
+        await d.ref.update({ nums: firebase.firestore.FieldValue.arrayRemove(e164) });
+      }
+    }
+  }catch(e){ console.warn('master cloud remove failed', e); }
+}
+
 // Parse a file of owned numbers (CSV / TXT / Excel) into a Set of E.164.
 async function parseOwnedFile(file, defCountry){
   // Parse into proper rows (worker → no freeze) and scan EVERY column, parsing each
@@ -1588,6 +1658,33 @@ $('btnMasterExport').addEventListener('click', async ()=>{
   const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href);
   $('masterStatus').textContent = `Exported ${masterSet.size.toLocaleString()} number(s) to ${name}.`;
 });
+
+// Master search + surgical remove (one number from the shared scrubber packet).
+function masterSearchDo(){
+  const raw=($('masterSearchInput').value||'').trim();
+  const res=$('masterSearchResult');
+  if(!raw){ res.innerHTML=''; return; }
+  let e164=null;
+  try{ const p=libphonenumber.parsePhoneNumber(raw, $('defaultCountry').value||'GB'); if(p && p.isValid()) e164=p.format('E.164'); }catch(_){}
+  if(!e164){ res.innerHTML=`<span style="color:var(--red)">Couldn't parse <code>${esc(raw)}</code> as a phone number.</span>`; return; }
+  if(masterSet.has(e164)){
+    res.innerHTML = `✅ <code>${esc(e164)}</code> is in the master scrubber. <button id="masterRemoveOne" class="btn btn-ghost btn-sm" type="button" data-e="${esc(e164)}">🗑 Remove from master</button>`;
+    $('masterRemoveOne').addEventListener('click', async ()=>{
+      if(!confirm(`Remove ${e164} from the master scrubber? This affects every signed-in user.`)) return;
+      $('masterRemoveOne').disabled=true; $('masterRemoveOne').textContent='Removing…';
+      masterSet.delete(e164);
+      await masterCloudRemove(e164);     // cloud snapshot will sync to all clients
+      if($('masterCount')) $('masterCount').textContent=masterSet.size.toLocaleString();
+      masterReportCompute();
+      res.innerHTML = `🗑 <code>${esc(e164)}</code> removed. Master now ${masterSet.size.toLocaleString()}.`;
+    });
+  } else {
+    res.innerHTML = `❌ <code>${esc(e164)}</code> is NOT in the master scrubber.`;
+  }
+}
+$('masterSearchBtn').addEventListener('click', masterSearchDo);
+$('masterSearchInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); masterSearchDo(); }});
+
 masterLoad();
 
 $('btnSave').addEventListener('click', async ()=>{
