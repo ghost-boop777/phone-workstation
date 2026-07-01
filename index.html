@@ -78,6 +78,7 @@
         <div class="panel" id="fileListPanel" style="display:none">
           <h3 class="panel-title">Files <span id="fileCount" class="badge">0</span></h3>
           <ul id="fileList" class="file-list"></ul>
+          <div id="srcBackupInfo" class="live-progress" style="margin-top:8px"></div>
         </div>
 
         <div class="panel" id="masterPanel">
@@ -246,6 +247,7 @@
         <button id="btnReport" class="btn btn-ghost" disabled>📊 Report</button>
         <button id="btnSaveBank" class="btn btn-ghost" disabled>📦 Save to bank</button>
         <button id="btnPackets" class="btn btn-ghost">📦 Packets</button>
+        <button id="btnSourceFiles" class="btn btn-ghost">📂 Source files</button>
         <button id="btnHistory" class="btn btn-ghost">📜 History</button>
         <input id="datasetName" type="text" placeholder="dataset name…" class="search-input" style="max-width:160px" />
         <button id="btnSave" class="btn btn-ghost">💾 Save</button>
@@ -424,6 +426,20 @@
   </div>
 </div>
 
-<script src="app.js?v=20260701b"></script>
+<div id="sourceModal" class="modal-overlay" style="display:none">
+  <div class="modal-card" style="max-width:720px">
+    <button id="sourceClose" class="modal-close" title="Close">✕</button>
+    <h2 class="modal-title">📂 Source files <span class="text-muted" style="font-size:12px;font-weight:400">(original uploads, in Google Drive)</span></h2>
+    <div id="sourceTotal" class="history-total"></div>
+    <input id="sourceSearch" type="text" placeholder="🔍 Search by file name or uploader…" class="search-input" style="margin-bottom:10px" />
+    <div id="sourceBody" class="history-body"></div>
+    <div class="modal-foot">
+      <button id="sourceExport" class="btn btn-ghost">⬇ Export index (CSV)</button>
+      <button id="sourceDone" class="btn btn-primary">Done</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=20260701c"></script>
 </body>
 </html>

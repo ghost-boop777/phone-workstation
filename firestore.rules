@@ -54,6 +54,11 @@ service cloud.firestore {
       allow read, write: if allowed();
     }
 
+    // Source-upload index (metadata only; the original raw files live in Google Drive).
+    match /uploads/{doc} {
+      allow read, write: if allowed();
+    }
+
     // Everything else is denied.
     match /{document=**} {
       allow read, write: if false;

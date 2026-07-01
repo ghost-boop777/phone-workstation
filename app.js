@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-01b';
-console.log('Phone Workstation build', BUILD, '— per-client DNC-Sent (cumulative unique dedup) + Add-clean relabel');
+const BUILD = '2026-07-01c';
+console.log('Phone Workstation build', BUILD, '— auto-backup raw uploads to Drive (Source files) + viewer');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -416,6 +416,7 @@ async function addFiles(files){
   }
   renderRawPreview();
   $('btnToValidate').disabled = state.rawRecords.length === 0;
+  backupSourceFiles(incoming);   // keep an original copy of each raw file in Drive (background, best-effort)
 }
 
 function renderFileList(){
@@ -1266,6 +1267,99 @@ async function reservePacketNo(){
     tx.set(ref, { next, updated: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
     return next;
   });
+}
+
+// ── Source uploads: keep an ORIGINAL copy of every dropped file in Drive ────
+// Separate from Lead Bank packets (processed exports) — this is the raw file
+// exactly as uploaded, so there is always a copy even if you never save a packet.
+const SRC_FOLDER_NAME = 'Phone Workstation — Source Uploads';
+let _srcFolderId = null, _srcRows = [], _srcUploadedSig = new Set();
+
+async function ensureSrcFolder(){
+  if(_srcFolderId) return _srcFolderId;
+  const q = encodeURIComponent(`name='${SRC_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const found = await driveApi(`files?q=${q}&fields=files(id,name)`, { method:'GET' });
+  if(found.files && found.files.length){ _srcFolderId=found.files[0].id; return _srcFolderId; }
+  const created = await driveApi('files?fields=id', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ name:SRC_FOLDER_NAME, mimeType:'application/vnd.google-apps.folder' }) });
+  _srcFolderId = created.id;
+  await shareWithTeam(_srcFolderId);
+  return _srcFolderId;
+}
+
+// Best-effort: upload each raw File (original bytes) to Drive + index in Firestore
+// `uploads`. Never throws — a Drive hiccup must not block parsing/validation.
+async function backupSourceFiles(files){
+  if(!_db || typeof window.ensureDriveToken!=='function') return;   // not signed in / Drive off
+  const el=$('srcBackupInfo');
+  let done=0, skipped=0;
+  for(const f of files){
+    const sig = f.name+'|'+f.size;
+    if(_srcUploadedSig.has(sig)){ skipped++; continue; }             // already backed up this session
+    try{
+      if(el) el.textContent = `☁ Backing up ${f.name} (${(f.size/1048576).toFixed(1)} MB)…`;
+      const folderId = await ensureSrcFolder();
+      const token = await window.ensureDriveToken();
+      const boundary='pwsrc'+Date.now();
+      const meta = JSON.stringify({ name:f.name, parents:[folderId] });
+      const pre = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${f.type||'application/octet-stream'}\r\n\r\n`;
+      const post = `\r\n--${boundary}--`;
+      const body = new Blob([pre, f, post]);                          // File embeds as binary Blob part
+      const up = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+        method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':`multipart/related; boundary=${boundary}` }, body });
+      if(!up.ok) throw new Error('HTTP '+up.status);
+      const file = await up.json();
+      await shareWithTeam(file.id);
+      await _db.collection('uploads').add({
+        name:f.name, size:f.size||0, mime:f.type||'', client: state.client||'',
+        driveFileId:file.id, driveLink:file.webViewLink||'', by:(firebase.auth().currentUser||{}).email||'',
+        at: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      _srcUploadedSig.add(sig); done++;
+    }catch(e){ console.warn('source backup failed', f.name, e); if(el) el.textContent = `⚠ Couldn't back up ${f.name} to Drive (kept locally). ${e.message||e}`; return; }
+  }
+  if(el) el.textContent = done ? `☁ ${done} file(s) backed up to Drive · 📂 Source files.${skipped?` (${skipped} already saved)`:''}` : '';
+}
+
+async function sourceOpen(){
+  if(!_db) return alert('Sign in to view source files.');
+  $('sourceTotal').textContent=''; $('sourceBody').innerHTML='<p class="text-muted" style="padding:12px">Loading…</p>';
+  $('sourceSearch').value=''; $('sourceModal').style.display='flex';
+  try{
+    const snap=await _db.collection('uploads').orderBy('at','desc').limit(2000).get();
+    const rows=[]; snap.forEach(d=>rows.push(d.data())); _srcRows=rows; renderSource(rows);
+  }catch(e){ $('sourceBody').innerHTML=`<p class="text-muted" style="padding:12px">Could not load: ${e.message||e}</p>`; }
+}
+function renderSource(rows){
+  let totalBytes=0; rows.forEach(r=>totalBytes+=(r.size||0));
+  $('sourceTotal').innerHTML=`<b>${rows.length}</b> source file(s) · <b>${(totalBytes/1048576).toFixed(1)}</b> MB backed up`;
+  $('sourceBody').innerHTML = rows.length ? `<table class="hist-table">
+    <thead><tr><th>File</th><th>Size</th><th>Client</th><th>By</th><th>Date</th><th>Open</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const d=r.at&&r.at.toDate?r.at.toDate():null;
+      const link=r.driveLink?`<a href="${esc(r.driveLink)}" target="_blank" rel="noopener">Open ↗</a>`:'—';
+      const mb=(r.size||0)/1048576;
+      return `<tr><td>${esc(r.name)||'—'}</td><td>${mb<0.1?((r.size||0)/1024).toFixed(0)+' KB':mb.toFixed(1)+' MB'}</td><td>${esc(r.client)||'—'}</td><td title="${esc(r.by)}">${esc((r.by||'').split('@')[0])||'—'}</td><td>${d?d.toLocaleDateString():'—'}</td><td>${link}</td></tr>`;
+    }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No source files yet. Drop a file in Step 1 — it\'s backed up automatically.</p>';
+}
+function sourceSearchDo(){
+  const q=($('sourceSearch').value||'').trim().toLowerCase();
+  if(!q) return renderSource(_srcRows);
+  renderSource(_srcRows.filter(r=>`${r.name||''} ${r.by||''} ${r.client||''}`.toLowerCase().includes(q)));
+}
+function sourceExport(){
+  if(!_srcRows.length) return alert('No source files.');
+  const out=_srcRows.map(r=>({ name:r.name||'', size_bytes:r.size||0, client:r.client||'', by:r.by||'', date:(r.at&&r.at.toDate?r.at.toDate().toISOString():''), drive_link:r.driveLink||'' }));
+  const blob=new Blob([Papa.unparse(out)],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='source_files.csv'; a.click(); URL.revokeObjectURL(a.href);
+}
+if($('btnSourceFiles')){
+  $('btnSourceFiles').addEventListener('click', sourceOpen);
+  $('sourceClose').addEventListener('click', ()=>$('sourceModal').style.display='none');
+  $('sourceDone').addEventListener('click', ()=>$('sourceModal').style.display='none');
+  $('sourceExport').addEventListener('click', sourceExport);
+  $('sourceSearch').addEventListener('input', sourceSearchDo);
+  $('sourceModal').addEventListener('click', e=>{ if(e.target===$('sourceModal')) $('sourceModal').style.display='none'; });
 }
 
 async function bankSavePacket(){
