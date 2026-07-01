@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-01d';
-console.log('Phone Workstation build', BUILD, '— saved datasets now cloud-backed (Google Drive + Firestore)');
+const BUILD = '2026-07-01e';
+console.log('Phone Workstation build', BUILD, '— fix Drive auto-backup popup-block (token at sign-in + click-to-enable)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1273,7 +1273,7 @@ async function reservePacketNo(){
 // Separate from Lead Bank packets (processed exports) — this is the raw file
 // exactly as uploaded, so there is always a copy even if you never save a packet.
 const SRC_FOLDER_NAME = 'Phone Workstation — Source Uploads';
-let _srcFolderId = null, _srcRows = [], _srcUploadedSig = new Set();
+let _srcFolderId = null, _srcRows = [], _srcUploadedSig = new Set(), _pendingBackup = [];
 
 async function ensureSrcFolder(){
   if(_srcFolderId) return _srcFolderId;
@@ -1287,28 +1287,56 @@ async function ensureSrcFolder(){
   return _srcFolderId;
 }
 
-// Best-effort: upload each raw File (original bytes) to Drive + index in Firestore
-// `uploads`. Never throws — a Drive hiccup must not block parsing/validation.
+// Entry point — runs in the BACKGROUND after parsing. It must NEVER open a popup:
+// browsers block popups outside a user gesture, which is what caused
+// `auth/popup-blocked`. If a Drive token isn't minted yet, queue the files and
+// show a one-click "Enable Drive backup" button (that click IS a gesture).
 async function backupSourceFiles(files){
   if(!_db || typeof window.ensureDriveToken!=='function') return;   // not signed in / Drive off
+  const pending = Array.from(files).filter(f=>!_srcUploadedSig.has(f.name+'|'+f.size));
+  if(!pending.length) return;
   const el=$('srcBackupInfo');
-  let done=0, skipped=0;
+  const haveToken = (typeof window.getDriveToken!=='function') || window.getDriveToken();
+  if(!haveToken){
+    for(const f of pending) if(!_pendingBackup.includes(f)) _pendingBackup.push(f);
+    if(el){
+      el.innerHTML = `☁ <button id="srcBackupNow" class="btn btn-ghost btn-sm" type="button">Enable Drive backup</button> — click once to grant Drive access, then ${_pendingBackup.length} file(s) will be saved.`;
+      const b=$('srcBackupNow'); if(b) b.onclick=runPendingBackup;
+    }
+    return;
+  }
+  await doBackupSource(pending);
+}
+// Triggered by a real click → allowed to open the Drive-consent popup once.
+async function runPendingBackup(){
+  const el=$('srcBackupInfo');
+  try{ if(el) el.textContent='☁ Requesting Drive access…'; await window.ensureDriveToken(); }
+  catch(e){ console.warn('drive grant failed', e); if(el) el.textContent=`⚠ Drive access not granted: ${e.message||e}`; return; }
+  const q=_pendingBackup.slice(); _pendingBackup.length=0;
+  await doBackupSource(q);
+}
+// Core uploader (original bytes → Drive + index in Firestore `uploads`). Best-effort:
+// on any failure it re-queues + offers a click-retry (which re-mints the token), so a
+// blocked popup, expired token or hiccup never hard-fails or blocks validation.
+async function doBackupSource(files){
+  const el=$('srcBackupInfo'); let done=0;
   for(const f of files){
-    const sig = f.name+'|'+f.size;
-    if(_srcUploadedSig.has(sig)){ skipped++; continue; }             // already backed up this session
+    const sig=f.name+'|'+f.size;
+    if(_srcUploadedSig.has(sig)) continue;
     try{
-      if(el) el.textContent = `☁ Backing up ${f.name} (${(f.size/1048576).toFixed(1)} MB)…`;
-      const folderId = await ensureSrcFolder();
-      const token = await window.ensureDriveToken();
+      if(el) el.textContent=`☁ Backing up ${f.name} (${(f.size/1048576).toFixed(1)} MB)…`;
+      const folderId=await ensureSrcFolder();
+      const token=await window.ensureDriveToken();
       const boundary='pwsrc'+Date.now();
-      const meta = JSON.stringify({ name:f.name, parents:[folderId] });
-      const pre = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${f.type||'application/octet-stream'}\r\n\r\n`;
-      const post = `\r\n--${boundary}--`;
-      const body = new Blob([pre, f, post]);                          // File embeds as binary Blob part
-      const up = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+      const meta=JSON.stringify({ name:f.name, parents:[folderId] });
+      const pre=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${f.type||'application/octet-stream'}\r\n\r\n`;
+      const post=`\r\n--${boundary}--`;
+      const body=new Blob([pre, f, post]);                            // File embeds as binary Blob part
+      const up=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
         method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':`multipart/related; boundary=${boundary}` }, body });
+      if(up.status===401){ if(window.clearDriveToken) window.clearDriveToken(); throw new Error('Drive session expired'); }
       if(!up.ok) throw new Error('HTTP '+up.status);
-      const file = await up.json();
+      const file=await up.json();
       await shareWithTeam(file.id);
       await _db.collection('uploads').add({
         name:f.name, size:f.size||0, mime:f.type||'', client: state.client||'',
@@ -1316,9 +1344,14 @@ async function backupSourceFiles(files){
         at: firebase.firestore.FieldValue.serverTimestamp()
       });
       _srcUploadedSig.add(sig); done++;
-    }catch(e){ console.warn('source backup failed', f.name, e); if(el) el.textContent = `⚠ Couldn't back up ${f.name} to Drive (kept locally). ${e.message||e}`; return; }
+    }catch(e){
+      console.warn('source backup failed', f.name, e);
+      for(const g of files) if(!_srcUploadedSig.has(g.name+'|'+g.size) && !_pendingBackup.includes(g)) _pendingBackup.push(g);
+      if(el){ el.innerHTML = `⚠ Couldn't back up to Drive (files kept locally). <button id="srcBackupNow" class="btn btn-ghost btn-sm" type="button">Retry Drive backup</button>`; const b=$('srcBackupNow'); if(b) b.onclick=runPendingBackup; }
+      return;
+    }
   }
-  if(el) el.textContent = done ? `☁ ${done} file(s) backed up to Drive · 📂 Source files.${skipped?` (${skipped} already saved)`:''}` : '';
+  if(el) el.textContent = done ? `☁ ${done} file(s) backed up to Drive · 📂 Source files.` : '';
 }
 
 async function sourceOpen(){

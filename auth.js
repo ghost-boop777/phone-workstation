@@ -38,6 +38,10 @@ try {
   auth = firebase.auth();
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);     // stay signed in across reloads
   provider = new firebase.auth.GoogleAuthProvider();
+  // Ask for Drive (drive.file) access up front, during the sign-in popup (a real
+  // user gesture), so background actions (auto source-file backup) already have a
+  // token and never need to open a popup themselves (which browsers block).
+  provider.addScope('https://www.googleapis.com/auth/drive.file');
   provider.setCustomParameters({ prompt: 'select_account' });
 } catch (e) {
   console.error('Firebase init failed', e);
@@ -48,7 +52,17 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btn) btn.addEventListener('click', async () => {
     if (!auth) return setMsg('Auth failed to load — check your connection and reload.', true);
     setMsg('Opening Google sign-in…');
-    try { await auth.signInWithPopup(provider); }
+    try {
+      const result = await auth.signInWithPopup(provider);
+      // Capture the Drive access token from the sign-in credential so later Drive
+      // work (incl. the background auto-backup) needs no second popup.
+      try{
+        const c = firebase.auth.GoogleAuthProvider.credentialFromResult
+          ? firebase.auth.GoogleAuthProvider.credentialFromResult(result)
+          : (result && result.credential);
+        if(c && c.accessToken) driveToken = c.accessToken;
+      }catch(_){}
+    }
     catch (e) {
       if (e.code === 'auth/operation-not-allowed' || e.code === 'auth/configuration-not-found')
         setMsg('Sign-in isn’t enabled yet. An admin needs to turn on Authentication + Google sign-in in the Firebase console, then try again.', true);
