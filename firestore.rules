@@ -59,6 +59,11 @@ service cloud.firestore {
       allow read, write: if allowed();
     }
 
+    // Saved-dataset index (metadata only; the dataset JSON files live in Google Drive).
+    match /datasets/{doc} {
+      allow read, write: if allowed();
+    }
+
     // Everything else is denied.
     match /{document=**} {
       allow read, write: if false;
