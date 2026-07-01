@@ -62,3 +62,15 @@ export function markOwned(records, masterSet) {
 export function masterAddDelta(e164s, masterSet) {
   return [...new Set(e164s)].filter(e => e && !masterSet.has(e));
 }
+
+// JohnFF "jeff" UK validator — mirror of app.js jeffValidate.
+// Strip SPACES only; valid iff exactly 11 chars, starts '0', all digits.
+// 07… → mobile, else landline.
+export function jeffValidate(raw) {
+  const s = String(raw == null ? '' : raw).replace(/ /g, '');
+  if (!s) return 'Invalid (empty)';
+  if (!/^[0-9]+$/.test(s)) return 'Invalid (non-numeric)';
+  if (s.length !== 11) return 'Invalid (not 11 digits)';
+  if (s[0] !== '0') return 'Invalid (no leading 0)';
+  return s.slice(0, 2) === '07' ? 'Valid mobile' : 'Valid landline';
+}
