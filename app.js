@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-01a';
-console.log('Phone Workstation build', BUILD, '— master search/remove + packet detail + lazy folder + txn counter + tests');
+const BUILD = '2026-07-01b';
+console.log('Phone Workstation build', BUILD, '— per-client DNC-Sent (cumulative unique dedup) + Add-clean relabel');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -473,7 +473,7 @@ async function runValidation(){
   if($('ukOnly').checked)
     state.records = state.records.filter(r => r._country === 'GB' || r._status === 'invalid');
 
-  showProgress(78,'Checking against master list…'); await tick();
+  showProgress(78,'Checking against sent list…'); await tick();
   if($('optMaster').checked) markOwned(state.records);
 
   showProgress(82,'Removing in-file duplicates…'); await tick();
@@ -1031,13 +1031,14 @@ $('btnExportFresh').addEventListener('click',()=>{
 // Add every valid number in the current results to the persistent master list,
 // so the next batch recognises them as already owned.
 $('btnMasterAdd').addEventListener('click', async ()=>{
+  if(!state.client) return alert('Pick a client in 📵 Master DNC — Sent first — the sent list is per client.');
   const e164s = state.records.filter(r=>r._status!=='invalid' && r._e164).map(r=>r._e164);
   if(!e164s.length) return alert('No valid numbers to add.');
-  // Remember these so the cloud snapshot doesn't flip them back to "owned" on screen.
+  // Remember these so the cloud snapshot doesn't flip them back to "sent" on screen.
   e164s.forEach(e=>justSavedToMaster.add(e));
   const added = await masterAddBulk(e164s);
   recompute();
-  alert(`Added ${added.toLocaleString()} new number(s) to your master list. It now holds ${masterSet.size.toLocaleString()}.`);
+  alert(`Recorded ${added.toLocaleString()} new number(s) as sent to ${state.client} (duplicates already on the list were skipped). ${state.client} now holds ${masterSet.size.toLocaleString()}.`);
 });
 
 function exportRows(pred, filename){
