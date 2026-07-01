@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-01c';
-console.log('Phone Workstation build', BUILD, '— auto-backup raw uploads to Drive (Source files) + viewer');
+const BUILD = '2026-07-01d';
+console.log('Phone Workstation build', BUILD, '— saved datasets now cloud-backed (Google Drive + Firestore)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1659,6 +1659,7 @@ function masterCloudInit(){
   try{ _db = firebase.firestore(); }catch(_){ _db=null; return; }
   _cloudReady = true;
   clientsLoad();
+  if(typeof refreshSaved==='function') refreshSaved();   // pull shared datasets from the cloud
 }
 // ── Client (recipient) list ────────────────────────────────────────────────
 async function clientsLoad(){
@@ -1800,37 +1801,126 @@ $('masterSearchInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.p
 
 masterLoad();
 
+// ── Saved datasets: cloud (Google Drive + Firestore index) with a local cache ──
+// The validated dataset is uploaded as JSON to a Drive folder + indexed in
+// Firestore `datasets`, so it's shared across devices/teammates. IndexedDB is
+// kept as a fast local cache (used first on Load).
+const DS_FOLDER_NAME = 'Phone Workstation — Saved Datasets';
+let _dsFolderId = null;
+
+async function ensureDatasetFolder(){
+  if(_dsFolderId) return _dsFolderId;
+  const q = encodeURIComponent(`name='${DS_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const found = await driveApi(`files?q=${q}&fields=files(id,name)`, { method:'GET' });
+  if(found.files && found.files.length){ _dsFolderId=found.files[0].id; return _dsFolderId; }
+  const created = await driveApi('files?fields=id', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ name:DS_FOLDER_NAME, mimeType:'application/vnd.google-apps.folder' }) });
+  _dsFolderId = created.id;
+  await shareWithTeam(_dsFolderId);
+  return _dsFolderId;
+}
+async function saveDatasetCloud(rec){
+  if(!_db || typeof window.ensureDriveToken!=='function') throw new Error('not signed in');
+  const folderId = await ensureDatasetFolder();
+  const token = await window.ensureDriveToken();
+  const json = JSON.stringify({ id:rec.id, name:rec.name, savedAt:rec.savedAt, count:rec.count, records:rec.records });
+  const boundary='pwds'+Date.now();
+  const meta = JSON.stringify({ name: rec.name.replace(/[^\w-]+/g,'_')+'.json', parents:[folderId] });
+  const pre = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n`;
+  const post = `\r\n--${boundary}--`;
+  const body = new Blob([pre, json, post]);
+  const up = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+    method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':`multipart/related; boundary=${boundary}` }, body });
+  if(!up.ok) throw new Error('Drive HTTP '+up.status);
+  const file = await up.json();
+  await shareWithTeam(file.id);
+  await _db.collection('datasets').doc(rec.id).set({
+    name:rec.name, count:rec.count, client: state.client||'',
+    driveFileId:file.id, driveLink:file.webViewLink||'', by:(firebase.auth().currentUser||{}).email||'',
+    at: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+async function loadDatasetCloud(id){
+  const doc = await _db.collection('datasets').doc(id).get();
+  if(!doc.exists) return null;
+  const token = await window.ensureDriveToken();
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${doc.data().driveFileId}?alt=media`, { headers:{ Authorization:'Bearer '+token } });
+  if(!res.ok) throw new Error('Drive HTTP '+res.status);
+  const j = await res.json();
+  const rec = { id, name:j.name, savedAt:j.savedAt||new Date().toISOString(), count:j.count, records:j.records };
+  try{ await dbPut(rec); }catch(_){}                        // warm the local cache
+  return rec;
+}
+async function deleteDatasetCloud(id){
+  const doc = await _db.collection('datasets').doc(id).get();
+  if(!doc.exists) return;
+  const fid = doc.data().driveFileId;
+  await _db.collection('datasets').doc(id).delete();
+  if(fid){ try{ await driveApi('files/'+fid, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ trashed:true }) }); }catch(_){} }
+}
+
 $('btnSave').addEventListener('click', async ()=>{
   if(!state.records.length) return alert('Nothing to save yet.');
   const name=($('datasetName').value.trim())||`dataset ${new Date().toLocaleString()}`;
   const rec={ id:'ds_'+Date.now(), name, savedAt:new Date().toISOString(), count:state.records.length, records:state.records };
-  try{ await dbPut(rec); $('datasetName').value=''; await refreshSaved(); alert(`Saved “${name}” (${rec.count.toLocaleString()} rows) to local storage.`); }
-  catch(err){ alert('Save failed: '+err.message); }
+  const btn=$('btnSave'); const orig=btn.textContent; btn.disabled=true; btn.textContent='Saving…';
+  let localOk=false, cloudNote='';
+  try{ await dbPut(rec); localOk=true; }catch(err){ console.warn('local save failed', err); }
+  try{ btn.textContent='Saving to Drive…'; await saveDatasetCloud(rec); cloudNote=' + Google Drive (shared)'; }
+  catch(e){ console.warn('dataset cloud save failed', e); cloudNote = localOk ? ' (Drive save failed — kept local)' : ''; }
+  btn.disabled=false; btn.textContent=orig;
+  if(!localOk && !cloudNote) return alert('Save failed — could not write locally or to Drive.');
+  $('datasetName').value=''; await refreshSaved();
+  alert(`Saved “${name}” (${rec.count.toLocaleString()} rows)${localOk?' to local storage':''}${cloudNote}.`);
 });
 
 async function refreshSaved(){
-  let list=[]; try{ list=await dbAll(); }catch(_){}
-  list.sort((a,b)=>b.savedAt.localeCompare(a.savedAt));
+  let local=[]; try{ local=await dbAll(); }catch(_){}
+  let cloud=[];
+  if(_db){ try{ const snap=await _db.collection('datasets').orderBy('at','desc').limit(500).get(); snap.forEach(d=>cloud.push({ id:d.id, ...d.data() })); }catch(_){} }
+  const byId=new Map();
+  for(const d of local) byId.set(d.id, { id:d.id, name:d.name, count:d.count||0, savedAt:d.savedAt||'', local:true, cloud:false });
+  for(const d of cloud){
+    const ex = byId.get(d.id) || { id:d.id, name:d.name, count:d.count||0, savedAt:(d.at&&d.at.toDate?d.at.toDate().toISOString():'') };
+    ex.cloud=true; ex.driveLink=d.driveLink||''; ex.name=ex.name||d.name; ex.count=ex.count||d.count||0;
+    if(!ex.savedAt && d.at&&d.at.toDate) ex.savedAt=d.at.toDate().toISOString();
+    byId.set(d.id, ex);
+  }
+  const list=[...byId.values()].sort((a,b)=>String(b.savedAt||'').localeCompare(String(a.savedAt||'')));
   $('savedCount').textContent=list.length;
   $('savedList').innerHTML = list.length ? list.map(d=>`
     <li class="file-item">
-      <span class="fi-name" title="${d.name}">${d.name}</span>
-      <span class="fi-size">${d.count.toLocaleString()}</span>
-      <button class="btn btn-ghost btn-sm" data-load="${d.id}">Load</button>
-      <button class="btn btn-ghost btn-sm" data-del="${d.id}">✕</button>
+      <span class="fi-name" title="${esc(d.name)}${d.cloud?' · ☁ Google Drive':' · local only'}">${d.cloud?'☁ ':''}${esc(d.name)}</span>
+      <span class="fi-size">${(d.count||0).toLocaleString()}</span>
+      <button class="btn btn-ghost btn-sm" data-load="${esc(d.id)}">Load</button>
+      <button class="btn btn-ghost btn-sm" data-del="${esc(d.id)}">✕</button>
     </li>`).join('') : '<li class="text-muted" style="font-size:12px;list-style:none">None yet.</li>';
+}
+function applyLoadedDataset(d){
+  state.records=d.records; state.rawRecords=d.records.slice();
+  state.records.forEach(r=>{ if(r._base===undefined) r._base=r._status; });
+  updateStats(); $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
+  $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnSaveBank').disabled=false;
+  state.tab='landline'; setActiveTab('landline'); renderTable(); showStep(3);
 }
 $('savedList').addEventListener('click', async e=>{
   const load=e.target.closest('[data-load]'), del=e.target.closest('[data-del]');
   if(load){
-    const d=await dbGet(load.dataset.load); if(!d) return;
-    state.records=d.records; state.rawRecords=d.records.slice();
-    state.records.forEach(r=>{ if(r._base===undefined) r._base=r._status; });
-    updateStats(); $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
-    $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnSaveBank').disabled=false;
-    state.tab='landline'; setActiveTab('landline'); renderTable(); showStep(3);
+    const id=load.dataset.load, btn=load;
+    let d=null; try{ d=await dbGet(id); }catch(_){}         // local cache first (fast)
+    if(!d && _db){                                          // else pull from Drive
+      btn.disabled=true; const o=btn.textContent; btn.textContent='Loading…';
+      try{ d=await loadDatasetCloud(id); }catch(err){ console.warn('cloud load failed', err); }
+      btn.disabled=false; btn.textContent=o;
+    }
+    if(!d || !d.records) return alert('Could not load that dataset.');
+    applyLoadedDataset(d);
   } else if(del){
-    if(confirm('Delete this saved dataset?')){ await dbDel(del.dataset.del); refreshSaved(); }
+    if(!confirm('Delete this saved dataset (local + Google Drive)?')) return;
+    const id=del.dataset.del;
+    try{ await dbDel(id); }catch(_){}
+    if(_db){ try{ await deleteDatasetCloud(id); }catch(err){ console.warn('cloud delete failed', err); } }
+    refreshSaved();
   }
 });
 refreshSaved();
