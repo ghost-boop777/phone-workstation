@@ -10,7 +10,13 @@
       "**/.git/**",
       ".github/**",
       "**/.github/**",
+      ".claude/**",
+      "**/.claude/**",
       "**/node_modules/**",
+      "tests/**",
+      "package.json",
+      "package-lock.json",
+      ".gitignore",
       "README.md",
       "firestore.rules"
     ],

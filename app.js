@@ -4,12 +4,12 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-06-27a';
+const BUILD = '2026-07-01a';
 console.log('Phone Workstation build', BUILD, '— master search/remove + packet detail + lazy folder + txn counter + tests');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
-  sortCol: null, sortDir: 'asc', page: 1, pageSize: 100, step: 1,
+  sortCol: null, sortDir: 'asc', page: 1, pageSize: 100, step: 1, client: '',
 };
 
 const PHONE_VARIANTS = ['phone','mobile','cell','telephone','tel','number','phone_number',
@@ -680,7 +680,7 @@ function markOwned(records){
   if(!masterSet.size) return;
   records.forEach(r=>{
     if(r._status==='invalid'||!r._e164) return;
-    if(masterSet.has(r._e164)){ r._status='owned'; r._reason='Already in master list'; }
+    if(masterSet.has(r._e164)){ r._status='owned'; r._reason=state.client?`Already sent to ${state.client}`:'Already sent'; }
   });
 }
 
@@ -768,7 +768,7 @@ function renderTable(){
   }).join('')}</tr>`;
 
   $('tableBody').innerHTML = pageRows.map(r=>`<tr>${cols.map(c=>{
-    if(c==='_status'){const m={landline:'b-landline ☎️ Landline',mobile:'b-mobile 📱 Mobile',other:'b-other 🔵 '+r._line,invalid:'b-invalid ❌ Invalid',duplicate:'b-duplicate 🔁 Dup',owned:'b-owned 📇 Owned',delivered:'b-delivered 📤 Delivered'};
+    if(c==='_status'){const m={landline:'b-landline ☎️ Landline',mobile:'b-mobile 📱 Mobile',other:'b-other 🔵 '+r._line,invalid:'b-invalid ❌ Invalid',duplicate:'b-duplicate 🔁 Dup',owned:'b-owned 📵 Sent',delivered:'b-delivered 📤 Delivered'};
       const raw=m[r._status]||'b-other '+r._status;const cls=raw.split(' ')[0];const lbl=raw.split(' ').slice(1).join(' ');
       return `<td><span class="badge-status ${cls}">${lbl}</span></td>`;}
     if(c==='_e164') return `<td><code>${r._e164||''}</code></td>`;
@@ -1127,7 +1127,7 @@ function openReport(){
     <div class="rep-row rep-total"><span>Total records</span><b>${r.total.toLocaleString()}</b></div>
     <div class="rep-row rep-pay"><span>✅ Valid — sendable</span><b>${r.fresh.toLocaleString()}</b></div>
     <div class="rep-sub">excluded</div>
-    <div class="rep-row"><span>📇 Already in master</span><b>${r.owned.toLocaleString()}</b></div>
+    <div class="rep-row"><span>📵 Already sent</span><b>${r.owned.toLocaleString()}</b></div>
     <div class="rep-row"><span>🔁 In-file duplicates</span><b>${r.dup.toLocaleString()}</b></div>
     <div class="rep-row"><span>❌ Invalid</span><b>${r.invalid.toLocaleString()}</b></div>
     ${scrub}
@@ -1139,7 +1139,7 @@ function exportReport(){
   const r=buildReport();
   const rows=[['Metric','Value'],
     ['Total records', r.total],['Valid (sendable)', r.fresh],
-    ['Already in master', r.owned],['In-file duplicates', r.dup],['Invalid', r.invalid],
+    ['Already sent', r.owned],['In-file duplicates', r.dup],['Invalid', r.invalid],
     ['Excluded total', r.dontPay]];
   if(r.scrubbed){ rows.push(['Scrubbed', r.scrubbed],['Active', r.active],['Dead', r.dead]); }
   const blob=new Blob([Papa.unparse(rows)],{type:'text/csv;charset=utf-8;'});
@@ -1270,6 +1270,7 @@ async function reservePacketNo(){
 async function bankSavePacket(){
   if(!state.records.length) return alert('Run validation first.');
   if(!_db) return alert('Sign in first.');
+  if(!state.client) return alert('Pick a client in 📵 Master DNC — Sent first. Saving records the numbers as "sent" to that client.');
   if(typeof window.ensureDriveToken!=='function') return alert('Drive not available — sign in.');
   const label = (prompt('Optional label for this packet (e.g. source / batch name):','')||'').trim();
   $('btnSaveBank').disabled=true; $('btnSaveBank').textContent='📦 Saving…';
@@ -1298,7 +1299,7 @@ async function bankSavePacket(){
     const shareFailed = await shareWithTeam(file.id);
     const r = buildReport();
     await _db.collection('packets').add({
-      packet_no: next, label: label||'', count: state.records.length,
+      packet_no: next, label: label||'', client: state.client, count: state.records.length,
       valid: r.fresh+r.owned, invalid: r.invalid, sendable: r.fresh, owned: r.owned, dup: r.dup,
       driveFileId: file.id, driveLink: file.webViewLink||'', by:(firebase.auth().currentUser||{}).email||'',
       at: firebase.firestore.FieldValue.serverTimestamp()
@@ -1309,7 +1310,7 @@ async function bankSavePacket(){
     const shareNote = shareFailed.length
       ? `\n\n⚠ Could not share with: ${shareFailed.join(', ')}. Please share the file manually from your Drive.`
       : '';
-    alert(`Saved Packet #${next} (${state.records.length.toLocaleString()} leads) to the Lead Bank, and added ${phones.length.toLocaleString()} numbers to the master scrubber packet.${shareNote}`);
+    alert(`Saved Packet #${next} (${state.records.length.toLocaleString()} leads) to the Lead Bank, and recorded ${phones.length.toLocaleString()} numbers as sent to ${state.client}.${shareNote}`);
   }catch(e){ alert('Could not save packet: '+(e.message||e)); }
   $('btnSaveBank').disabled=false; $('btnSaveBank').textContent='📦 Save to bank';
 }
@@ -1350,12 +1351,13 @@ function renderPacketDetail(b){
     <div class="rep-grid">
       <div class="rep-row rep-total"><span>📦 Packet #</span><b>${b.packet_no||'—'}</b></div>
       <div class="rep-row rep-total"><span>Label</span><b>${esc(b.label)||'—'}</b></div>
+      <div class="rep-row rep-total"><span>📵 Sent to</span><b>${esc(b.client)||'—'}</b></div>
       <div class="rep-row rep-total"><span>Uploaded by</span><b>${esc(b.by)||'—'}</b></div>
       <div class="rep-row rep-total"><span>Date</span><b>${d?d.toLocaleString():'—'}</b></div>
       <div class="rep-row"><span>Total leads</span><b>${(b.count||0).toLocaleString()}</b></div>
       <div class="rep-row rep-pay"><span>✅ Valid (sendable)</span><b>${(b.sendable||b.fresh||0).toLocaleString()}</b></div>
       <div class="rep-sub">excluded</div>
-      <div class="rep-row"><span>📇 Already in master</span><b>${(b.owned||0).toLocaleString()}</b></div>
+      <div class="rep-row"><span>📵 Already sent</span><b>${(b.owned||0).toLocaleString()}</b></div>
       <div class="rep-row"><span>🔁 In-file duplicates</span><b>${(b.dup||0).toLocaleString()}</b></div>
       <div class="rep-row"><span>❌ Invalid</span><b>${(b.invalid||0).toLocaleString()}</b></div>
       <div class="rep-row"><span>Excluded total</span><b>${excl.toLocaleString()}</b></div>
@@ -1474,42 +1476,47 @@ async function dbAll(){ const db=await openDB(); return new Promise((res,rej)=>{
 async function dbGet(id){ const db=await openDB(); return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const rq=tx.objectStore(STORE).get(id);rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej(rq.error);}); }
 async function dbDel(id){ const db=await openDB(); return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);}); }
 
-// ── Master list: in-memory set, persisted locally (IndexedDB) + shared cloud (Firestore) ─
+// ── DNC-Sent: per-client "already sent" numbers (Firestore, real-time) ────
+// masterSet = the SELECTED client's sent set. Switching client reloads it.
 const masterSet = new Set();
+let _db = null, _cloudReady = false, _dncUnsub = null;
+const DNC_COL = 'dnc', CLOUD_SHARD = 5000;
+let _clients = [];
 
-// Cloud (Firestore) state
-let _db = null, _masterUnsub = null, _cloudSeeded = false, _cloudReady = false;
-const MASTER_COL = 'master', CLOUD_SHARD = 5000;
+async function masterLoad(){ masterStatus(); }
 
-async function masterLoad(){
-  // Master is now cloud-authoritative (loaded via Firestore on sign-in). Local IndexedDB is
-  // no longer read into the set, so a cloud clear can't be undone by stale local data.
-  masterStatus();
-}
+// Mark numbers as "already sent" to the SELECTED client (per-client DNC list).
 async function masterAddBulk(e164s){
+  if(!state.client){ alert('Pick a client first — the DNC-Sent list is stored per client.'); return 0; }
   const fresh=[...new Set(e164s)].filter(e=>e && !masterSet.has(e));
-  if(fresh.length){
-    const db=await openDB();
-    await new Promise((res,rej)=>{const tx=db.transaction(MASTER_STORE,'readwrite');const st=tx.objectStore(MASTER_STORE);fresh.forEach(p=>st.put({p}));tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});
+  if(fresh.length && _db){
     fresh.forEach(e=>masterSet.add(e));
-    masterCloudAdd(fresh);                 // mirror new numbers to the shared cloud list
+    for(let i=0;i<fresh.length;i+=CLOUD_SHARD){
+      const chunk=fresh.slice(i,i+CLOUD_SHARD);
+      try{ await _db.collection(DNC_COL).add({ client:state.client, nums:chunk, at: firebase.firestore.FieldValue.serverTimestamp() }); }
+      catch(e){ console.warn('dnc push failed', e); break; }
+    }
   }
   masterStatus();
   return fresh.length;
 }
+// Clear the SELECTED client's sent list.
 async function masterClearAll(){
-  const db=await openDB();
-  await new Promise((res,rej)=>{const tx=db.transaction(MASTER_STORE,'readwrite');tx.objectStore(MASTER_STORE).clear();tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});
-  masterSet.clear();
-  await masterCloudClear();               // also clear the shared cloud list
-  masterStatus();
+  if(!_db || !state.client) return;
+  try{
+    const snap=await _db.collection(DNC_COL).where('client','==',state.client).get();
+    let batch=_db.batch(), c=0;
+    for(const d of snap.docs){ batch.delete(d.ref); if(++c%400===0){ await batch.commit(); batch=_db.batch(); } }
+    await batch.commit();
+  }catch(e){ console.warn('dnc clear failed', e); }
+  masterSet.clear(); masterStatus();
 }
 function masterStatus(){
   const n=masterSet.size;
-  if($('masterCount'))  $('masterCount').textContent=n.toLocaleString();
-  if($('masterStatus')) $('masterStatus').textContent = n
-    ? `${n.toLocaleString()} owned number(s)${_cloudReady?' · ☁ shared':''}.`
-    : (_cloudReady ? 'No master numbers yet (shared). Import the numbers you own.' : 'No master numbers yet. Import the numbers you own.');
+  if($('masterCount')) $('masterCount').textContent=n.toLocaleString();
+  if($('masterStatus')) $('masterStatus').textContent = !state.client
+    ? 'Select a client above — the DNC-Sent list is per client.'
+    : `${state.client}: ${n.toLocaleString()} number(s) already sent.`;
 }
 
 // ── Master live report (offline validation) + active-check (online scrub) ──
@@ -1551,55 +1558,62 @@ function renderMasterReport(r){
   </div>`;
 }
 
-// ── Shared master list via Firestore (real-time, additive) ────────────────
-// Called once after an allowlisted user signs in (from auth.js → unlock()).
+// ── Per-client DNC sync (Firestore) — called after sign-in from auth.js ────
 function masterCloudInit(){
-  if(_masterUnsub || typeof firebase==='undefined' || !firebase.firestore) return;
+  if(_db || typeof firebase==='undefined' || !firebase.firestore) return;
   try{ _db = firebase.firestore(); }catch(_){ _db=null; return; }
-  _masterUnsub = _db.collection(MASTER_COL).onSnapshot(snap=>{
-    _cloudReady = true;
-    masterSet.clear();                    // cloud is the single source of truth
-    snap.forEach(d=>(d.data().nums||[]).forEach(e=>masterSet.add(e)));
-    masterStatus();
-    masterReportCompute();                // refresh the live master report
-    if(state.records.length) recompute();
-  }, err=>{ console.warn('master cloud sync error', err); });
+  _cloudReady = true;
+  clientsLoad();
 }
-// Write numbers up to Firestore in sharded array docs.
-async function masterCloudPush(e164s){
-  if(!_db || !e164s.length) return 0;
-  let n=0;
-  for(let i=0;i<e164s.length;i+=CLOUD_SHARD){
-    const chunk=e164s.slice(i,i+CLOUD_SHARD);
-    try{ await _db.collection(MASTER_COL).add({ nums:chunk, at: firebase.firestore.FieldValue.serverTimestamp() }); n+=chunk.length; }
-    catch(e){ console.warn('master cloud push failed', e); break; }
-  }
-  return n;
-}
-function masterCloudAdd(fresh){ if(_db && fresh && fresh.length) masterCloudPush(fresh); }
-async function masterCloudClear(){
+// ── Client (recipient) list ────────────────────────────────────────────────
+async function clientsLoad(){
   if(!_db) return;
-  try{
-    const snap=await _db.collection(MASTER_COL).get();
-    let batch=_db.batch(), c=0;
-    for(const d of snap.docs){ batch.delete(d.ref); if(++c%400===0){ await batch.commit(); batch=_db.batch(); } }
-    await batch.commit();
-  }catch(e){ console.warn('master cloud clear failed', e); }
+  try{ const snap=await _db.doc('config/clients').get(); _clients=((snap.exists && snap.data().names)||[]).slice().sort(); }
+  catch(_){ _clients=[]; }
+  renderClients();
 }
-
-// Surgically remove ONE number from the sharded master cloud. Walks every shard
-// and uses arrayRemove on the ones that contain it.
+function renderClients(){
+  const sel=$('clientSelect'); if(!sel) return;
+  const cur=state.client||'';
+  sel.innerHTML='<option value="">— select client —</option>'+_clients.map(c=>`<option value="${esc(c)}"${c===cur?' selected':''}>${esc(c)}</option>`).join('');
+}
+async function clientAdd(name){
+  name=(name||'').trim(); if(!name) return;
+  if(!_clients.some(c=>c.toLowerCase()===name.toLowerCase())){
+    _clients.push(name); _clients.sort();
+    if(_db){ try{ await _db.doc('config/clients').set({ names: firebase.firestore.FieldValue.arrayUnion(name) }, {merge:true}); }catch(e){ console.warn(e); } }
+  }
+  renderClients(); if($('clientNew')) $('clientNew').value='';
+  selectClient(name);
+}
+function selectClient(name){ state.client=name||''; sentLoad(state.client); }
+// Load the SELECTED client's sent set (realtime) into masterSet.
+function sentLoad(client){
+  if(_dncUnsub){ _dncUnsub(); _dncUnsub=null; }
+  masterSet.clear();
+  if(!_db || !client){ masterStatus(); masterReportCompute(); if(state.records.length) recompute(); return; }
+  _dncUnsub = _db.collection(DNC_COL).where('client','==',client).onSnapshot(snap=>{
+    masterSet.clear();
+    snap.forEach(d=>(d.data().nums||[]).forEach(e=>masterSet.add(e)));
+    masterStatus(); masterReportCompute();
+    if(state.records.length) recompute();
+  }, err=>console.warn('dnc load error', err));
+}
+if($('clientSelect')){
+  $('clientSelect').addEventListener('change', e=>selectClient(e.target.value));
+  $('clientAddBtn').addEventListener('click', ()=>clientAdd($('clientNew').value));
+  $('clientNew').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); clientAdd($('clientNew').value); }});
+}
+// Remove ONE number from the SELECTED client's sent list.
 async function masterCloudRemove(e164){
-  if(!_db || !e164) return;
+  if(!_db || !e164 || !state.client) return;
   try{
-    const snap=await _db.collection(MASTER_COL).get();
+    const snap=await _db.collection(DNC_COL).where('client','==',state.client).get();
     for(const d of snap.docs){
       const nums=d.data().nums||[];
-      if(nums.includes(e164)){
-        await d.ref.update({ nums: firebase.firestore.FieldValue.arrayRemove(e164) });
-      }
+      if(nums.includes(e164)) await d.ref.update({ nums: firebase.firestore.FieldValue.arrayRemove(e164) });
     }
-  }catch(e){ console.warn('master cloud remove failed', e); }
+  }catch(e){ console.warn('dnc remove failed', e); }
 }
 
 // Parse a file of owned numbers (CSV / TXT / Excel) into a Set of E.164.
@@ -1624,27 +1638,30 @@ async function parseOwnedFile(file, defCountry){
 
 $('masterImport').addEventListener('change', async e=>{
   const f=e.target.files[0]; if(!f) return;
-  $('masterStatus').textContent='Reading owned numbers…';
+  if(!state.client){ $('masterStatus').textContent='Pick a client above first.'; alert('Pick a client first — imported numbers are recorded as sent to that client.'); e.target.value=''; return; }
+  $('masterStatus').textContent='Reading numbers…';
   try{
     const def=$('defaultCountry')?.value||'GB';
     const set=await parseOwnedFile(f, def);
     const added=await masterAddBulk([...set]);
-    $('masterStatus').textContent=`Read ${(set._rowsRead||0).toLocaleString()} rows · ${set.size.toLocaleString()} unique valid found (every column) · ${added.toLocaleString()} new added · master now ${masterSet.size.toLocaleString()}.`;
+    $('masterStatus').textContent=`Read ${(set._rowsRead||0).toLocaleString()} rows · ${set.size.toLocaleString()} unique valid found (every column) · ${added.toLocaleString()} new marked sent · ${state.client} now ${masterSet.size.toLocaleString()}.`;
     e.target.value='';
-    recompute();          // re-flag on-screen results against the updated master
-    masterReportCompute();// refresh the live master report
+    recompute();          // re-flag on-screen results against the updated sent list
+    masterReportCompute();// refresh the live report
   }catch(err){ $('masterStatus').textContent='Could not read that file.'; console.warn(err); }
 });
 $('btnMasterClear').addEventListener('click', async ()=>{
+  if(!state.client) return alert('Pick a client first.');
   if(!masterSet.size) return;
-  if(!confirm(`Clear all ${masterSet.size.toLocaleString()} owned numbers from the master list?`)) return;
+  if(!confirm(`Clear all ${masterSet.size.toLocaleString()} numbers sent to ${state.client}?`)) return;
   await masterClearAll();
   recompute();
 });
 
-// Streaming export of the whole master scrubber as CSV (doesn't freeze on 168k+ rows).
+// Streaming export of the selected client's sent list as CSV (doesn't freeze on 168k+ rows).
 $('btnMasterExport').addEventListener('click', async ()=>{
-  if(!masterSet.size) return alert('Master is empty — nothing to export.');
+  if(!state.client) return alert('Pick a client first.');
+  if(!masterSet.size) return alert(`${state.client} has no sent numbers yet — nothing to export.`);
   $('masterStatus').textContent = `Preparing CSV (${masterSet.size.toLocaleString()} numbers)…`;
   await tick();
   const parts = ['e164\n'];
@@ -1654,32 +1671,33 @@ $('btnMasterExport').addEventListener('click', async ()=>{
     if((++i & 16383)===0) await tick();      // yield to UI every ~16k rows
   }
   const blob = new Blob(parts, {type:'text/csv;charset=utf-8;'});
-  const name = `master_scrubber_${new Date().toISOString().slice(0,10)}_${masterSet.size}.csv`;
+  const name = `dnc_sent_${state.client.replace(/[^\w-]+/g,'_')}_${new Date().toISOString().slice(0,10)}_${masterSet.size}.csv`;
   const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href);
   $('masterStatus').textContent = `Exported ${masterSet.size.toLocaleString()} number(s) to ${name}.`;
 });
 
-// Master search + surgical remove (one number from the shared scrubber packet).
+// Search + surgical remove (one number from the selected client's sent list).
 function masterSearchDo(){
   const raw=($('masterSearchInput').value||'').trim();
   const res=$('masterSearchResult');
   if(!raw){ res.innerHTML=''; return; }
+  if(!state.client){ res.innerHTML=`<span style="color:var(--red)">Pick a client first.</span>`; return; }
   let e164=null;
   try{ const p=libphonenumber.parsePhoneNumber(raw, $('defaultCountry').value||'GB'); if(p && p.isValid()) e164=p.format('E.164'); }catch(_){}
   if(!e164){ res.innerHTML=`<span style="color:var(--red)">Couldn't parse <code>${esc(raw)}</code> as a phone number.</span>`; return; }
   if(masterSet.has(e164)){
-    res.innerHTML = `✅ <code>${esc(e164)}</code> is in the master scrubber. <button id="masterRemoveOne" class="btn btn-ghost btn-sm" type="button" data-e="${esc(e164)}">🗑 Remove from master</button>`;
+    res.innerHTML = `✅ <code>${esc(e164)}</code> was already sent to ${esc(state.client)}. <button id="masterRemoveOne" class="btn btn-ghost btn-sm" type="button" data-e="${esc(e164)}">🗑 Remove from sent</button>`;
     $('masterRemoveOne').addEventListener('click', async ()=>{
-      if(!confirm(`Remove ${e164} from the master scrubber? This affects every signed-in user.`)) return;
+      if(!confirm(`Remove ${e164} from ${state.client}'s sent list? It will become sendable to ${state.client} again for everyone.`)) return;
       $('masterRemoveOne').disabled=true; $('masterRemoveOne').textContent='Removing…';
       masterSet.delete(e164);
-      await masterCloudRemove(e164);     // cloud snapshot will sync to all clients
+      await masterCloudRemove(e164);     // cloud snapshot will sync to all users
       if($('masterCount')) $('masterCount').textContent=masterSet.size.toLocaleString();
       masterReportCompute();
-      res.innerHTML = `🗑 <code>${esc(e164)}</code> removed. Master now ${masterSet.size.toLocaleString()}.`;
+      res.innerHTML = `🗑 <code>${esc(e164)}</code> removed. ${esc(state.client)} now ${masterSet.size.toLocaleString()}.`;
     });
   } else {
-    res.innerHTML = `❌ <code>${esc(e164)}</code> is NOT in the master scrubber.`;
+    res.innerHTML = `❌ <code>${esc(e164)}</code> has NOT been sent to ${esc(state.client)}.`;
   }
 }
 $('masterSearchBtn').addEventListener('click', masterSearchDo);

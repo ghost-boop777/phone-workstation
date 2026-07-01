@@ -28,7 +28,18 @@ service cloud.firestore {
       allow read, write: if allowed();
     }
 
-    // Shared master list (owned numbers), sharded into documents of arrays.
+    // Per-client DNC-Sent lists (numbers already sent to a given client),
+    // sharded into documents of arrays tagged with { client }.
+    match /dnc/{doc} {
+      allow read, write: if allowed();
+    }
+
+    // Recipient/client roster used by the DNC-Sent dropdown.
+    match /config/clients {
+      allow read, write: if allowed();
+    }
+
+    // Legacy master list (kept readable so old data can be cleaned up).
     match /master/{doc} {
       allow read, write: if allowed();
     }
