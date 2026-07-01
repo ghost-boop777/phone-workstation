@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-01e';
-console.log('Phone Workstation build', BUILD, '— fix Drive auto-backup popup-block (token at sign-in + click-to-enable)');
+const BUILD = '2026-07-02a';
+console.log('Phone Workstation build', BUILD, '— add JohnFF "jeff" UK validate column (4th column)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -455,16 +455,18 @@ async function runValidation(){
   $('progressWrap').style.display = '';
   $('emptyState').style.display='none';
 
-  // Fresh working copy from the raw rows (strip any prior _ fields)
-  state.records = state.rawRecords.map(r=>{
-    const o={}; for(const k of Object.keys(r)) if(!k.startsWith('_')||k==='_file') o[k]=r[k]; return o;
-  });
-
   const defCountry = $('defaultCountry').value;
   const colHint = $('phoneCol').value.trim().toLowerCase();
 
   showProgress(40,'Detecting phone column…'); await tick();
-  const phoneCol = detectCol(state.records, colHint);
+  const phoneCol = detectCol(state.rawRecords, colHint);
+
+  // Fresh working copy from the raw rows (strip any prior _ fields), inserting the
+  // JohnFF "jeff" UK verdict as the 4th column ("validate").
+  state.records = state.rawRecords.map(r=>{
+    const src={}; for(const k of Object.keys(r)) if(!k.startsWith('_')||k==='_file') src[k]=r[k];
+    return withJeffColumn(src, phoneCol);
+  });
 
   showProgress(50,'Validating & classifying…'); await tick();
   await classifyChunked(state.records, phoneCol, defCountry,
@@ -613,6 +615,36 @@ function numberQuality(nsn, country){
 }
 
 // ── Validate + UK line-type classification (one record) ───────────────────
+// ── JohnFF "jeff" UK validator (github.com/JohnFF/UK-Phone-Number-Validator) ──
+// Faithful to the extension's rule (BROKEN_VALUES_FORMULA): strip SPACES only, then
+// a number is valid iff it's exactly 11 chars, starts with '0', and is all digits.
+// Type: starts '07' → mobile, otherwise landline. (This is stricter than libphone —
+// e.g. a Cardiff number exported without its leading 0, "2921406370", is invalid here.)
+function jeffValidate(raw){
+  const s = String(raw==null?'':raw).replace(/ /g,'');   // JohnFF removes spaces only
+  if(!s) return 'Invalid (empty)';
+  if(!/^[0-9]+$/.test(s)) return 'Invalid (non-numeric)';
+  if(s.length !== 11)     return 'Invalid (not 11 digits)';
+  if(s[0] !== '0')        return 'Invalid (no leading 0)';
+  return s.slice(0,2)==='07' ? 'Valid mobile' : 'Valid landline';
+}
+// Return a copy of a record with the jeff verdict inserted as the 4th DATA column
+// (position 4 among non-`_` columns). Drops any prior "validate" so re-runs are stable.
+function withJeffColumn(src, phoneCol){
+  const verdict = jeffValidate(phoneCol ? src[phoneCol] : '');
+  const out={}; let visible=0, inserted=false;
+  for(const k of Object.keys(src)){
+    if(k==='validate') continue;                          // drop a prior jeff column
+    if(!k.startsWith('_')){                                // a visible data column
+      if(visible===3 && !inserted){ out.validate=verdict; inserted=true; }
+      visible++;
+    }
+    out[k]=src[k];
+  }
+  if(!inserted) out.validate=verdict;                     // fewer than 4 data cols → append
+  return out;
+}
+
 function classifyOne(r, phoneCol, defCountry, opts){
   const raw = phoneCol ? String(r[phoneCol]??'').trim() : '';
   r._raw = raw;

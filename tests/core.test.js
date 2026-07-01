@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyOne, dedup, markOwned, masterAddDelta } from './core.js';
+import { classifyOne, dedup, markOwned, masterAddDelta, jeffValidate } from './core.js';
 
 test('classify: valid UK mobile → mobile + E.164', () => {
   const r = classifyOne({ phone: '07911 123456' }, 'phone', 'GB');
@@ -107,4 +107,31 @@ test('masterAddDelta: returns only numbers not already in master, dedupes input'
 test('masterAddDelta: with empty master returns all unique non-empty', () => {
   const fresh = masterAddDelta(['+447400111111', '+447400222222'], new Set());
   assert.equal(fresh.length, 2);
+});
+
+test('jeffValidate: 11-digit 07… (with space) → Valid mobile', () => {
+  assert.equal(jeffValidate('07911 123456'), 'Valid mobile');
+  assert.equal(jeffValidate('07911123456'), 'Valid mobile');
+});
+
+test('jeffValidate: 11-digit 0… non-07 → Valid landline', () => {
+  assert.equal(jeffValidate('02920 140637'), 'Valid landline'); // 11 digits
+  assert.equal(jeffValidate('01234567890'), 'Valid landline');
+});
+
+test('jeffValidate: screenshot data missing leading 0 is rejected', () => {
+  // "2921406370" is a 10-digit Cardiff number exported without its 0 — jeff rejects it
+  // (fails the 11-digit rule first; either way it's invalid).
+  assert.equal(jeffValidate('2921406370'), 'Invalid (not 11 digits)');
+  // An 11-char all-digit value that doesn't start with 0 → the leading-0 rule fires.
+  assert.equal(jeffValidate('29214063700'), 'Invalid (no leading 0)');
+});
+
+test('jeffValidate: wrong length / non-numeric / empty', () => {
+  assert.equal(jeffValidate('0791112345'), 'Invalid (not 11 digits)');   // 10 digits
+  assert.equal(jeffValidate('079111234567'), 'Invalid (not 11 digits)'); // 12 digits
+  assert.equal(jeffValidate('+447911123456'), 'Invalid (non-numeric)');  // '+' is non-numeric
+  assert.equal(jeffValidate('0791-112-3456'), 'Invalid (non-numeric)');  // dashes
+  assert.equal(jeffValidate(''), 'Invalid (empty)');
+  assert.equal(jeffValidate(null), 'Invalid (empty)');
 });
