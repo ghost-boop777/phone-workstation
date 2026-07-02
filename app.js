@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-02a';
-console.log('Phone Workstation build', BUILD, '— add JohnFF "jeff" UK validate column (4th column)');
+const BUILD = '2026-07-02b';
+console.log('Phone Workstation build', BUILD, '— "Needs live check" export (minimal payable HLR set, free pre-filter)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -496,7 +496,7 @@ async function runValidation(){
   updateStats();
   $('progressWrap').style.display='none';
   $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
-  $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false;
+  $('btnExportFresh').disabled=false; $('btnExportLive').disabled=false; $('btnMasterAdd').disabled=false;
   $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnSaveBank').disabled=false; updateScrubTargetInfo();
   $('btnTpsApi').disabled = !$('tpsApiUrl').value.trim();
   $('btnProcess').disabled = false;
@@ -1061,6 +1061,32 @@ $('btnExportFresh').addEventListener('click',()=>{
   exportRows(r=>(r._status==='landline'||r._status==='mobile'||r._status==='other') && !(auto && r._tps),'fresh_leads.csv');
 });
 
+// The MINIMAL payable set for a live/HLR check: valid + callable + unique + NOT
+// already-sent + NOT already live-checked (+ not TPS-suppressed). Everything the
+// free offline pipeline already ruled out is excluded, so you pay for the fewest
+// possible lookups. E.164 is the first column so bulk HLR tools read it directly,
+// and it's the key to merge the active/dead results back in later.
+function exportNeedsLiveCheck(){
+  if(!state.records.length) return alert('Run validation first.');
+  const auto = $('tpsAuto').checked;
+  const need = state.records.filter(r =>
+    (r._status==='landline'||r._status==='mobile'||r._status==='other') &&
+    r._e164 && !r._live && !(auto && r._tps));
+  const total = state.records.length;
+  if(!need.length) return alert(`Nothing needs a paid live check — all ${total.toLocaleString()} were either filtered out for free (invalid / unallocated / reserved / duplicate / already-sent) or already checked.`);
+  const dataKeys = Object.keys(state.records[0]).filter(k=>!k.startsWith('_'));
+  const out = need.map(r=>{
+    const o = { phone_e164:r._e164, line_type:r._line||'', area:r._area||'' };
+    dataKeys.forEach(k=>{ if(!(k in o)) o[k]=r[k]??''; });   // keep original columns for context
+    return o;
+  });
+  const blob=new Blob([Papa.unparse(out)],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='needs_live_check.csv'; a.click(); URL.revokeObjectURL(a.href);
+  const saved = total - need.length;
+  alert(`📡 ${need.length.toLocaleString()} number(s) still need a paid live check.\n\n${saved.toLocaleString()} of ${total.toLocaleString()} were removed for FREE (invalid / unallocated / reserved / duplicate / already-sent / already-checked).\n\nExported just those ${need.length.toLocaleString()} to needs_live_check.csv (E.164 in the first column). Run ONLY this file through your HLR provider so you pay for the fewest lookups.`);
+}
+$('btnExportLive').addEventListener('click', exportNeedsLiveCheck);
+
 // Add every valid number in the current results to the persistent master list,
 // so the next batch recognises them as already owned.
 $('btnMasterAdd').addEventListener('click', async ()=>{
@@ -1609,7 +1635,7 @@ $('btnReset').addEventListener('click',()=>{
   $('pagination').style.display='none';
   $('btnToValidate').disabled=true;
   $('btnExportSafe').disabled=true; $('btnExportLandline').disabled=true; $('btnExportAll').disabled=true; $('btnToScrub').disabled=true;
-  $('btnExportFresh').disabled=true; $('btnMasterAdd').disabled=true; $('btnReport').disabled=true; $('btnSaveBank').disabled=true;
+  $('btnExportFresh').disabled=true; $('btnExportLive').disabled=true; $('btnMasterAdd').disabled=true; $('btnReport').disabled=true; $('btnSaveBank').disabled=true;
   $('searchInput').value='';
   // Reset online-scrub state
   scrub.running=false; scrub.counters=null;
@@ -1965,7 +1991,7 @@ function applyLoadedDataset(d){
   state.records=d.records; state.rawRecords=d.records.slice();
   state.records.forEach(r=>{ if(r._base===undefined) r._base=r._status; });
   updateStats(); $('btnExportSafe').disabled=false; $('btnExportLandline').disabled=false; $('btnExportAll').disabled=false; $('btnExportSQL').disabled=false;
-  $('btnExportFresh').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnSaveBank').disabled=false;
+  $('btnExportFresh').disabled=false; $('btnExportLive').disabled=false; $('btnMasterAdd').disabled=false; $('btnToScrub').disabled=false; $('btnReport').disabled=false; $('btnSaveBank').disabled=false;
   state.tab='landline'; setActiveTab('landline'); renderTable(); showStep(3);
 }
 $('savedList').addEventListener('click', async e=>{
