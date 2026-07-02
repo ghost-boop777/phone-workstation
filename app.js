@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-02b';
-console.log('Phone Workstation build', BUILD, '— "Needs live check" export (minimal payable HLR set, free pre-filter)');
+const BUILD = '2026-07-02c';
+console.log('Phone Workstation build', BUILD, '— exclude premium/toll-free from Needs-live-check payable set');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1071,9 +1071,10 @@ function exportNeedsLiveCheck(){
   const auto = $('tpsAuto').checked;
   const need = state.records.filter(r =>
     (r._status==='landline'||r._status==='mobile'||r._status==='other') &&
+    r._line!=='Premium' && r._line!=='Toll-free' &&   // never cold-called → don't pay to check them
     r._e164 && !r._live && !(auto && r._tps));
   const total = state.records.length;
-  if(!need.length) return alert(`Nothing needs a paid live check — all ${total.toLocaleString()} were either filtered out for free (invalid / unallocated / reserved / duplicate / already-sent) or already checked.`);
+  if(!need.length) return alert(`Nothing needs a paid live check — all ${total.toLocaleString()} were either filtered out for free (invalid / unallocated / reserved / premium / toll-free / duplicate / already-sent) or already checked.`);
   const dataKeys = Object.keys(state.records[0]).filter(k=>!k.startsWith('_'));
   const out = need.map(r=>{
     const o = { phone_e164:r._e164, line_type:r._line||'', area:r._area||'' };
@@ -1083,7 +1084,7 @@ function exportNeedsLiveCheck(){
   const blob=new Blob([Papa.unparse(out)],{type:'text/csv;charset=utf-8;'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='needs_live_check.csv'; a.click(); URL.revokeObjectURL(a.href);
   const saved = total - need.length;
-  alert(`📡 ${need.length.toLocaleString()} number(s) still need a paid live check.\n\n${saved.toLocaleString()} of ${total.toLocaleString()} were removed for FREE (invalid / unallocated / reserved / duplicate / already-sent / already-checked).\n\nExported just those ${need.length.toLocaleString()} to needs_live_check.csv (E.164 in the first column). Run ONLY this file through your HLR provider so you pay for the fewest lookups.`);
+  alert(`📡 ${need.length.toLocaleString()} number(s) still need a paid live check.\n\n${saved.toLocaleString()} of ${total.toLocaleString()} were removed for FREE (invalid / unallocated / reserved / premium / toll-free / duplicate / already-sent / already-checked).\n\nExported just those ${need.length.toLocaleString()} to needs_live_check.csv (E.164 in the first column). Run ONLY this file through your HLR provider so you pay for the fewest lookups.`);
 }
 $('btnExportLive').addEventListener('click', exportNeedsLiveCheck);
 
