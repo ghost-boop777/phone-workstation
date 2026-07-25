@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-02c';
-console.log('Phone Workstation build', BUILD, '— exclude premium/toll-free from Needs-live-check payable set');
+const BUILD = '2026-07-02d';
+console.log('Phone Workstation build', BUILD, '— consent-capture funnel (/capture) + 📥 Captured leads viewer');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1452,6 +1452,54 @@ if($('btnSourceFiles')){
   $('sourceExport').addEventListener('click', sourceExport);
   $('sourceSearch').addEventListener('input', sourceSearchDo);
   $('sourceModal').addEventListener('click', e=>{ if(e.target===$('sourceModal')) $('sourceModal').style.display='none'; });
+}
+
+// ── Captured leads: consented sign-ups from the public /capture form ───────
+let _leadRows = [];
+async function leadsOpen(){
+  if(!_db) return alert('Sign in to view captured leads.');
+  $('leadsTotal').textContent=''; $('leadsBody').innerHTML='<p class="text-muted" style="padding:12px">Loading…</p>';
+  $('leadsSearch').value=''; $('leadsModal').style.display='flex';
+  try{
+    const snap=await _db.collection('leads').orderBy('at','desc').limit(5000).get();
+    const rows=[]; snap.forEach(d=>rows.push(d.data())); _leadRows=rows; renderLeads(rows);
+  }catch(e){ $('leadsBody').innerHTML=`<p class="text-muted" style="padding:12px">Could not load: ${e.message||e}</p>`; }
+}
+function renderLeads(rows){
+  $('leadsTotal').innerHTML=`<b>${rows.length.toLocaleString()}</b> consented lead(s) captured`;
+  $('leadsBody').innerHTML = rows.length ? `<table class="hist-table">
+    <thead><tr><th>Name</th><th>Phone</th><th>Town</th><th>Source</th><th>Consent</th><th>Date</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const d=r.at&&r.at.toDate?r.at.toDate():null;
+      const name=`${esc(r.firstName)||''} ${esc(r.lastName)||''}`.trim()||'—';
+      return `<tr><td>${name}</td><td><code>${esc(r.phone)||'—'}</code></td><td>${esc(r.town)||'—'}</td><td>${esc(r.source)||'—'}</td><td title="${esc(r.consentText)}">✅ ${esc(r.consentVersion)||'yes'}</td><td>${d?d.toLocaleDateString():'—'}</td></tr>`;
+    }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No captured leads yet. Share your <code>/capture</code> form link to start collecting consented sign-ups.</p>';
+}
+function leadsSearchDo(){
+  const q=($('leadsSearch').value||'').trim().toLowerCase();
+  if(!q) return renderLeads(_leadRows);
+  renderLeads(_leadRows.filter(r=>`${r.firstName||''} ${r.lastName||''} ${r.phone||''} ${r.town||''} ${r.postcode||''}`.toLowerCase().includes(q)));
+}
+// Export in a workstation-friendly shape (phone column detectable) so it feeds
+// straight back into upload → validate → scrub. Carries the consent audit trail.
+function leadsExport(){
+  if(!_leadRows.length) return alert('No captured leads to export.');
+  const out=_leadRows.map(r=>({
+    first_name:r.firstName||'', last_name:r.lastName||'', phone:r.phone||'', email:r.email||'',
+    address:r.address||'', town:r.town||'', postcode:r.postcode||'',
+    consent:'yes', consent_version:r.consentVersion||'', consent_text:r.consentText||'',
+    source:r.source||'', captured_at:(r.at&&r.at.toDate?r.at.toDate().toISOString():'')
+  }));
+  const blob=new Blob([Papa.unparse(out)],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='captured_leads.csv'; a.click(); URL.revokeObjectURL(a.href);
+}
+if($('btnLeads')){
+  $('btnLeads').addEventListener('click', leadsOpen);
+  $('leadsClose').addEventListener('click', ()=>$('leadsModal').style.display='none');
+  $('leadsDone').addEventListener('click', ()=>$('leadsModal').style.display='none');
+  $('leadsExport').addEventListener('click', leadsExport);
+  $('leadsSearch').addEventListener('input', leadsSearchDo);
+  $('leadsModal').addEventListener('click', e=>{ if(e.target===$('leadsModal')) $('leadsModal').style.display='none'; });
 }
 
 async function bankSavePacket(){
