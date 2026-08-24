@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-02e';
-console.log('Phone Workstation build', BUILD, '— computer-repair lead funnel (/repair) + enquiry fields in leads viewer');
+const BUILD = '2026-07-02f';
+console.log('Phone Workstation build', BUILD, '— removed public lead-capture (private-only) + chunked dataset save (no freeze)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1454,58 +1454,6 @@ if($('btnSourceFiles')){
   $('sourceModal').addEventListener('click', e=>{ if(e.target===$('sourceModal')) $('sourceModal').style.display='none'; });
 }
 
-// ── Captured leads: consented sign-ups from the public /capture form ───────
-let _leadRows = [];
-async function leadsOpen(){
-  if(!_db) return alert('Sign in to view captured leads.');
-  $('leadsTotal').textContent=''; $('leadsBody').innerHTML='<p class="text-muted" style="padding:12px">Loading…</p>';
-  $('leadsSearch').value=''; $('leadsModal').style.display='flex';
-  try{
-    const snap=await _db.collection('leads').orderBy('at','desc').limit(5000).get();
-    const rows=[]; snap.forEach(d=>rows.push(d.data())); _leadRows=rows; renderLeads(rows);
-  }catch(e){ $('leadsBody').innerHTML=`<p class="text-muted" style="padding:12px">Could not load: ${e.message||e}</p>`; }
-}
-function renderLeads(rows){
-  $('leadsTotal').innerHTML=`<b>${rows.length.toLocaleString()}</b> consented lead(s) captured`;
-  $('leadsBody').innerHTML = rows.length ? `<table class="hist-table">
-    <thead><tr><th>Name</th><th>Phone</th><th>Enquiry</th><th>When</th><th>Area</th><th>Mktg</th><th>Date</th></tr></thead>
-    <tbody>${rows.map(r=>{
-      const d=r.at&&r.at.toDate?r.at.toDate():null;
-      const name=`${esc(r.firstName)||''} ${esc(r.lastName)||''}`.trim()||'—';
-      const enquiry = [esc(r.service), esc(r.device)].filter(Boolean).join(' · ') || '—';
-      const mktg = r.marketingConsent ? '✅' : '—';
-      return `<tr><td title="${esc(r.consentText)}">${name}</td><td><code>${esc(r.phone)||'—'}</code></td><td title="${esc(r.issue)}">${enquiry}</td><td>${esc(r.urgency)||'—'}</td><td>${esc(r.postcode)||esc(r.town)||'—'}</td><td>${mktg}</td><td>${d?d.toLocaleDateString():'—'}</td></tr>`;
-    }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No captured leads yet. Share your <code>/repair</code> (or <code>/capture</code>) form link to start collecting consented enquiries.</p>';
-}
-function leadsSearchDo(){
-  const q=($('leadsSearch').value||'').trim().toLowerCase();
-  if(!q) return renderLeads(_leadRows);
-  renderLeads(_leadRows.filter(r=>`${r.firstName||''} ${r.lastName||''} ${r.phone||''} ${r.town||''} ${r.postcode||''} ${r.service||''} ${r.issue||''}`.toLowerCase().includes(q)));
-}
-// Export in a workstation-friendly shape (phone column detectable) so it feeds
-// straight back into upload → validate → scrub. Carries the enquiry + consent trail.
-function leadsExport(){
-  if(!_leadRows.length) return alert('No captured leads to export.');
-  const out=_leadRows.map(r=>({
-    first_name:r.firstName||'', last_name:r.lastName||'', phone:r.phone||'', email:r.email||'',
-    address:r.address||'', town:r.town||'', postcode:r.postcode||'',
-    service:r.service||'', device:r.device||'', issue:r.issue||'', urgency:r.urgency||'',
-    enquiry_consent:'yes', marketing_consent:(r.marketingConsent?'yes':'no'),
-    consent_version:r.consentVersion||'', consent_text:r.consentText||'',
-    source:r.source||'', captured_at:(r.at&&r.at.toDate?r.at.toDate().toISOString():'')
-  }));
-  const blob=new Blob([Papa.unparse(out)],{type:'text/csv;charset=utf-8;'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='captured_leads.csv'; a.click(); URL.revokeObjectURL(a.href);
-}
-if($('btnLeads')){
-  $('btnLeads').addEventListener('click', leadsOpen);
-  $('leadsClose').addEventListener('click', ()=>$('leadsModal').style.display='none');
-  $('leadsDone').addEventListener('click', ()=>$('leadsModal').style.display='none');
-  $('leadsExport').addEventListener('click', leadsExport);
-  $('leadsSearch').addEventListener('input', leadsSearchDo);
-  $('leadsModal').addEventListener('click', e=>{ if(e.target===$('leadsModal')) $('leadsModal').style.display='none'; });
-}
-
 async function bankSavePacket(){
   if(!state.records.length) return alert('Run validation first.');
   if(!_db) return alert('Sign in first.');
@@ -1963,16 +1911,30 @@ async function ensureDatasetFolder(){
   await shareWithTeam(_dsFolderId);
   return _dsFolderId;
 }
+// Serialize the dataset to an array of JSON fragments, yielding to the UI every few
+// thousand rows. A single JSON.stringify of a 100k+ row array blocks the tab for
+// seconds (and allocates one ~100MB+ string); this stays responsive and lets the Blob
+// reference the fragments without ever building one giant contiguous string.
+async function serializeDatasetParts(rec){
+  const recs = rec.records || [];
+  const parts = [`{"id":${JSON.stringify(rec.id)},"name":${JSON.stringify(rec.name)},"savedAt":${JSON.stringify(rec.savedAt)},"count":${rec.count},"records":[`];
+  for(let i=0;i<recs.length;i++){
+    parts.push((i?',':'') + JSON.stringify(recs[i]));
+    if((i & 8191)===8191) await tick();     // yield ~every 8k rows
+  }
+  parts.push(']}');
+  return parts;
+}
 async function saveDatasetCloud(rec){
   if(!_db || typeof window.ensureDriveToken!=='function') throw new Error('not signed in');
   const folderId = await ensureDatasetFolder();
   const token = await window.ensureDriveToken();
-  const json = JSON.stringify({ id:rec.id, name:rec.name, savedAt:rec.savedAt, count:rec.count, records:rec.records });
+  const jsonParts = await serializeDatasetParts(rec);   // chunked → no UI freeze on big datasets
   const boundary='pwds'+Date.now();
   const meta = JSON.stringify({ name: rec.name.replace(/[^\w-]+/g,'_')+'.json', parents:[folderId] });
   const pre = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n`;
   const post = `\r\n--${boundary}--`;
-  const body = new Blob([pre, json, post]);
+  const body = new Blob([pre, ...jsonParts, post]);
   const up = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
     method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':`multipart/related; boundary=${boundary}` }, body });
   if(!up.ok) throw new Error('Drive HTTP '+up.status);
