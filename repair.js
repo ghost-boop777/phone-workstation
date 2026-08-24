@@ -12,7 +12,8 @@
    ═════════════════════════════════════════════════════════════════════════ */
 const CONFIG = {
   COMPANY_NAME:  '',   // e.g. 'FixMyLaptop UK'  ← REQUIRED to go live (your trading name)
-  PRIVACY_URL:   '',   // https link to your published privacy policy  ← REQUIRED
+  PRIVACY_URL:   '',   // your published privacy policy  ← REQUIRED. A starter you can fill in is at /privacy
+                       //   e.g. 'https://phone-workstation.web.app/privacy'
   PRIVACY_EMAIL: '',   // e.g. 'hello@fixmylaptop.uk' — where people withdraw consent
   HEADLINE: '💻 Free laptop & PC repair quote',
   SUBLINE:  'Tell us what’s wrong and get a free, no-obligation quote from a local expert — usually within the hour.',

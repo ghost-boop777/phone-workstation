@@ -11,7 +11,8 @@
    ═════════════════════════════════════════════════════════════════════════ */
 const CONFIG = {
   COMPANY_NAME:  '',   // e.g. 'Acme Offers Ltd'  ← REQUIRED to go live (your trading name)
-  PRIVACY_URL:   '',   // https link to your published privacy policy  ← REQUIRED
+  PRIVACY_URL:   '',   // your published privacy policy  ← REQUIRED. A starter you can fill in is at /privacy
+                       //   e.g. 'https://phone-workstation.web.app/privacy'
   PRIVACY_EMAIL: '',   // e.g. 'privacy@acme.co.uk' — where people email to withdraw consent
   HEADLINE: 'Win a £250 shopping voucher 🎁',
   SUBLINE:  'Pop your details in for a chance to win — and to be first to hear about our latest UK offers.',
