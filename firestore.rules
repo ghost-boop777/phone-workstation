@@ -74,7 +74,7 @@ service cloud.firestore {
     }
     function validLead(d) {
       return d.consent == true
-        && d.keys().hasOnly(['firstName','lastName','phone','email','address','town','postcode','consent','consentText','consentVersion','source','userAgent','at'])
+        && d.keys().hasOnly(['firstName','lastName','phone','email','address','town','postcode','consent','marketingConsent','consentText','consentVersion','service','device','issue','urgency','source','userAgent','at'])
         && d.firstName is string && d.firstName.size() > 0 && d.firstName.size() <= 80
         && d.lastName is string && d.lastName.size() <= 80
         && d.phone is string && d.phone.size() >= 7 && d.phone.size() <= 30
@@ -82,10 +82,15 @@ service cloud.firestore {
         && d.address is string && d.address.size() <= 200
         && d.town is string && d.town.size() <= 80
         && d.postcode is string && d.postcode.size() <= 12
-        && d.consentText is string && d.consentText.size() > 0 && d.consentText.size() <= 500
+        && d.consentText is string && d.consentText.size() > 0 && d.consentText.size() <= 600
         && d.consentVersion is string && d.consentVersion.size() <= 40
         && d.source is string && d.source.size() <= 60
         && d.userAgent is string && d.userAgent.size() <= 300
+        && d.get('marketingConsent', false) is bool
+        && d.get('service', '') is string && d.get('service', '').size() <= 80
+        && d.get('device', '') is string && d.get('device', '').size() <= 80
+        && d.get('issue', '') is string && d.get('issue', '').size() <= 500
+        && d.get('urgency', '') is string && d.get('urgency', '').size() <= 40
         && d.at == request.time;
     }
 

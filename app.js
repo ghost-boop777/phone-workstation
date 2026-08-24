@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-02d';
-console.log('Phone Workstation build', BUILD, '— consent-capture funnel (/capture) + 📥 Captured leads viewer');
+const BUILD = '2026-07-02e';
+console.log('Phone Workstation build', BUILD, '— computer-repair lead funnel (/repair) + enquiry fields in leads viewer');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1468,26 +1468,30 @@ async function leadsOpen(){
 function renderLeads(rows){
   $('leadsTotal').innerHTML=`<b>${rows.length.toLocaleString()}</b> consented lead(s) captured`;
   $('leadsBody').innerHTML = rows.length ? `<table class="hist-table">
-    <thead><tr><th>Name</th><th>Phone</th><th>Town</th><th>Source</th><th>Consent</th><th>Date</th></tr></thead>
+    <thead><tr><th>Name</th><th>Phone</th><th>Enquiry</th><th>When</th><th>Area</th><th>Mktg</th><th>Date</th></tr></thead>
     <tbody>${rows.map(r=>{
       const d=r.at&&r.at.toDate?r.at.toDate():null;
       const name=`${esc(r.firstName)||''} ${esc(r.lastName)||''}`.trim()||'—';
-      return `<tr><td>${name}</td><td><code>${esc(r.phone)||'—'}</code></td><td>${esc(r.town)||'—'}</td><td>${esc(r.source)||'—'}</td><td title="${esc(r.consentText)}">✅ ${esc(r.consentVersion)||'yes'}</td><td>${d?d.toLocaleDateString():'—'}</td></tr>`;
-    }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No captured leads yet. Share your <code>/capture</code> form link to start collecting consented sign-ups.</p>';
+      const enquiry = [esc(r.service), esc(r.device)].filter(Boolean).join(' · ') || '—';
+      const mktg = r.marketingConsent ? '✅' : '—';
+      return `<tr><td title="${esc(r.consentText)}">${name}</td><td><code>${esc(r.phone)||'—'}</code></td><td title="${esc(r.issue)}">${enquiry}</td><td>${esc(r.urgency)||'—'}</td><td>${esc(r.postcode)||esc(r.town)||'—'}</td><td>${mktg}</td><td>${d?d.toLocaleDateString():'—'}</td></tr>`;
+    }).join('')}</tbody></table>` : '<p class="text-muted" style="padding:12px">No captured leads yet. Share your <code>/repair</code> (or <code>/capture</code>) form link to start collecting consented enquiries.</p>';
 }
 function leadsSearchDo(){
   const q=($('leadsSearch').value||'').trim().toLowerCase();
   if(!q) return renderLeads(_leadRows);
-  renderLeads(_leadRows.filter(r=>`${r.firstName||''} ${r.lastName||''} ${r.phone||''} ${r.town||''} ${r.postcode||''}`.toLowerCase().includes(q)));
+  renderLeads(_leadRows.filter(r=>`${r.firstName||''} ${r.lastName||''} ${r.phone||''} ${r.town||''} ${r.postcode||''} ${r.service||''} ${r.issue||''}`.toLowerCase().includes(q)));
 }
 // Export in a workstation-friendly shape (phone column detectable) so it feeds
-// straight back into upload → validate → scrub. Carries the consent audit trail.
+// straight back into upload → validate → scrub. Carries the enquiry + consent trail.
 function leadsExport(){
   if(!_leadRows.length) return alert('No captured leads to export.');
   const out=_leadRows.map(r=>({
     first_name:r.firstName||'', last_name:r.lastName||'', phone:r.phone||'', email:r.email||'',
     address:r.address||'', town:r.town||'', postcode:r.postcode||'',
-    consent:'yes', consent_version:r.consentVersion||'', consent_text:r.consentText||'',
+    service:r.service||'', device:r.device||'', issue:r.issue||'', urgency:r.urgency||'',
+    enquiry_consent:'yes', marketing_consent:(r.marketingConsent?'yes':'no'),
+    consent_version:r.consentVersion||'', consent_text:r.consentText||'',
     source:r.source||'', captured_at:(r.at&&r.at.toDate?r.at.toDate().toISOString():'')
   }));
   const blob=new Blob([Papa.unparse(out)],{type:'text/csv;charset=utf-8;'});
