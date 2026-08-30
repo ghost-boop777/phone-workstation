@@ -11,6 +11,7 @@
 const ALLOWED_EMAILS = [
   'helloleads2@gmail.com',
   'thalableedblue@gmail.com',
+  'kajamal1985@gmail.com',
   // add more authorized emails here, lowercase
 ];
 

@@ -6,7 +6,8 @@ service cloud.firestore {
     function isFounder() {
       return request.auth != null && request.auth.token.email in [
         'helloleads2@gmail.com',
-        'thalableedblue@gmail.com'
+        'thalableedblue@gmail.com',
+        'kajamal1985@gmail.com'
       ];
     }
     function cfgExists() { return exists(/databases/$(database)/documents/config/allowlist); }
