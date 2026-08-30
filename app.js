@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-02f';
-console.log('Phone Workstation build', BUILD, '— removed public lead-capture (private-only) + chunked dataset save (no freeze)');
+const BUILD = '2026-07-02g';
+console.log('Phone Workstation build', BUILD, '— DNC-Sent: add TXT (Notepad) export alongside CSV');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1846,23 +1846,29 @@ $('btnMasterClear').addEventListener('click', async ()=>{
   recompute();
 });
 
-// Streaming export of the selected client's sent list as CSV (doesn't freeze on 168k+ rows).
-$('btnMasterExport').addEventListener('click', async ()=>{
+// Streaming export of the selected client's sent list (doesn't freeze on 168k+ rows).
+//  csv → 'e164' header + one number per line (spreadsheets)
+//  txt → plain list, one number per line, no header (opens cleanly in Notepad)
+// Uses \r\n so Windows Notepad shows one number per line rather than a single run-on line.
+async function exportSentList(fmt){
   if(!state.client) return alert('Pick a client first.');
   if(!masterSet.size) return alert(`${state.client} has no sent numbers yet — nothing to export.`);
-  $('masterStatus').textContent = `Preparing CSV (${masterSet.size.toLocaleString()} numbers)…`;
+  const isTxt = fmt === 'txt';
+  $('masterStatus').textContent = `Preparing ${isTxt?'text file':'CSV'} (${masterSet.size.toLocaleString()} numbers)…`;
   await tick();
-  const parts = ['e164\n'];
+  const parts = isTxt ? [] : ['e164\r\n'];
   let i = 0;
   for(const e of masterSet){
-    parts.push(e); parts.push('\n');
+    parts.push(e); parts.push('\r\n');
     if((++i & 16383)===0) await tick();      // yield to UI every ~16k rows
   }
-  const blob = new Blob(parts, {type:'text/csv;charset=utf-8;'});
-  const name = `dnc_sent_${state.client.replace(/[^\w-]+/g,'_')}_${new Date().toISOString().slice(0,10)}_${masterSet.size}.csv`;
+  const blob = new Blob(parts, {type: isTxt ? 'text/plain;charset=utf-8;' : 'text/csv;charset=utf-8;'});
+  const name = `dnc_sent_${state.client.replace(/[^\w-]+/g,'_')}_${new Date().toISOString().slice(0,10)}_${masterSet.size}.${isTxt?'txt':'csv'}`;
   const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href);
   $('masterStatus').textContent = `Exported ${masterSet.size.toLocaleString()} number(s) to ${name}.`;
-});
+}
+$('btnMasterExport').addEventListener('click', ()=>exportSentList('csv'));
+$('btnMasterExportTxt').addEventListener('click', ()=>exportSentList('txt'));
 
 // Search + surgical remove (one number from the selected client's sent list).
 function masterSearchDo(){
