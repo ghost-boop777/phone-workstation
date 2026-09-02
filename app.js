@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-02h';
-console.log('Phone Workstation build', BUILD, '— DNC breakdown on-demand (fast client-select on 300k+ lists)');
+const BUILD = '2026-07-02i';
+console.log('Phone Workstation build', BUILD, '— Ofcom/quality checks off by default (faster scrubbing on big files)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
