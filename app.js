@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-02g';
-console.log('Phone Workstation build', BUILD, '— DNC-Sent: add TXT (Notepad) export alongside CSV');
+const BUILD = '2026-07-02h';
+console.log('Phone Workstation build', BUILD, '— DNC breakdown on-demand (fast client-select on 300k+ lists)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1744,6 +1744,15 @@ function renderMasterReport(r){
     <span class="mrep">☎️ Landline<b>${r.landline.toLocaleString()}</b></span>
   </div>`;
 }
+// The valid/mobile/landline breakdown re-classifies EVERY sent number, which is slow
+// on a 300k+ list. So it's on-demand now: after the list loads we just show a button,
+// and only compute when clicked. Selecting a client / importing stays instant.
+function masterReportStale(){
+  const el=$('masterReport'); if(!el) return;
+  if(!masterSet.size){ el.innerHTML=''; return; }
+  el.innerHTML = `<button id="btnMasterReport" class="btn btn-ghost btn-sm" type="button">📊 Show valid / mobile / landline breakdown</button>`;
+  const b=$('btnMasterReport'); if(b) b.onclick=()=>{ el.innerHTML='<span class="live-progress">Computing…</span>'; masterReportCompute(); };
+}
 
 // ── Per-client DNC sync (Firestore) — called after sign-in from auth.js ────
 function masterCloudInit(){
@@ -1779,11 +1788,11 @@ function selectClient(name){ state.client=name||''; sentLoad(state.client); }
 function sentLoad(client){
   if(_dncUnsub){ _dncUnsub(); _dncUnsub=null; }
   masterSet.clear();
-  if(!_db || !client){ masterStatus(); masterReportCompute(); if(state.records.length) recompute(); return; }
+  if(!_db || !client){ masterStatus(); masterReportStale(); if(state.records.length) recompute(); return; }
   _dncUnsub = _db.collection(DNC_COL).where('client','==',client).onSnapshot(snap=>{
     masterSet.clear();
     snap.forEach(d=>(d.data().nums||[]).forEach(e=>masterSet.add(e)));
-    masterStatus(); masterReportCompute();
+    masterStatus(); masterReportStale();   // instant count now; breakdown is on-demand
     if(state.records.length) recompute();
   }, err=>console.warn('dnc load error', err));
 }
@@ -1835,7 +1844,7 @@ $('masterImport').addEventListener('change', async e=>{
     $('masterStatus').textContent=`Read ${(set._rowsRead||0).toLocaleString()} rows · ${set.size.toLocaleString()} unique valid found (every column) · ${added.toLocaleString()} new marked sent · ${state.client} now ${masterSet.size.toLocaleString()}.`;
     e.target.value='';
     recompute();          // re-flag on-screen results against the updated sent list
-    masterReportCompute();// refresh the live report
+    masterReportStale();  // breakdown on-demand (no auto re-classify of the whole list)
   }catch(err){ $('masterStatus').textContent='Could not read that file.'; console.warn(err); }
 });
 $('btnMasterClear').addEventListener('click', async ()=>{
@@ -1887,7 +1896,7 @@ function masterSearchDo(){
       masterSet.delete(e164);
       await masterCloudRemove(e164);     // cloud snapshot will sync to all users
       if($('masterCount')) $('masterCount').textContent=masterSet.size.toLocaleString();
-      masterReportCompute();
+      masterReportStale();
       res.innerHTML = `🗑 <code>${esc(e164)}</code> removed. ${esc(state.client)} now ${masterSet.size.toLocaleString()}.`;
     });
   } else {
