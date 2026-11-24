@@ -236,3 +236,26 @@ html.is-admin #btnUsers{display:inline-flex}
   .stats-bar{grid-template-columns:repeat(3,1fr)}
   .topbar-actions{display:none}
 }
+
+/* ── Validate-only employee role: hide every import / export / save / modify /
+      data-extraction control. They can still upload, validate/scrub and see
+      results on screen. (DNC writes are also blocked server-side by rules.) ── */
+html.role-validate-only #btnMasterImportLabel,
+html.role-validate-only #btnMasterExport,
+html.role-validate-only #btnMasterExportTxt,
+html.role-validate-only #btnMasterClear,
+html.role-validate-only #btnMasterAdd,
+html.role-validate-only #masterRemoveOne,
+html.role-validate-only #btnSaveBank,
+html.role-validate-only #btnSave,
+html.role-validate-only #btnPackets,
+html.role-validate-only #btnSourceFiles,
+html.role-validate-only #btnExportSafe,
+html.role-validate-only #btnExportLandline,
+html.role-validate-only #btnExportAll,
+html.role-validate-only #btnExportSQL,
+html.role-validate-only #btnExportFresh,
+html.role-validate-only #btnExportLive,
+html.role-validate-only #reportExport,
+html.role-validate-only #datasetName,
+html.role-validate-only #btnUsers { display: none !important; }
