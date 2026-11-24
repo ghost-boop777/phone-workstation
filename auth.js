@@ -17,7 +17,7 @@ const ALLOWED_EMAILS = [
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDK7wcA-0hujY-Ii09NIvMSPdIulFOFgtc',
-  authDomain: 'phone-workstation.firebaseapp.com',
+  authDomain: 'phone-workstation.web.app',   // same-origin as the app → sign-in works in incognito / storage-partitioned browsers (fixes "missing initial state")
   projectId: 'phone-workstation',
   storageBucket: 'phone-workstation.firebasestorage.app',
   messagingSenderId: '437695082938',
