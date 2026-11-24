@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-11-24a';
-console.log('Phone Workstation build', BUILD, '— validate-only employee role (scrub/check only; no import/export/modify)');
+const BUILD = '2026-11-24b';
+console.log('Phone Workstation build', BUILD, '— same-domain auth (fixes incognito "missing initial state" sign-in error)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
