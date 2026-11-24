@@ -17,6 +17,14 @@ service cloud.firestore {
     // Allowed = a founder, OR a signed-in user added to the self-serve allowlist.
     function allowed() { return isFounder() || (request.auth != null && inAllowlist()); }
 
+    // Validate-only = an allowlisted employee flagged in config/allowlist.validateOnly:
+    // may READ (to scrub/validate) but may NOT write anything. Founders are never this.
+    function isValidateOnly() {
+      return !isFounder() && cfgExists() && request.auth != null
+        && request.auth.token.email in get(/databases/$(database)/documents/config/allowlist).data.get('validateOnly', []);
+    }
+    function canWrite() { return allowed() && !isValidateOnly(); }
+
     // Self-serve allowlist: any signed-in user may READ it (to check themselves on login);
     // only founders may EDIT it.
     match /config/allowlist {
@@ -26,43 +34,51 @@ service cloud.firestore {
 
     // Race-safe packet number counter — incremented in a transaction.
     match /config/packet_counter {
-      allow read, write: if allowed();
+      allow read: if allowed();
+      allow write: if canWrite();
     }
 
     // Per-client DNC-Sent lists (numbers already sent to a given client),
     // sharded into documents of arrays tagged with { client }.
     match /dnc/{doc} {
-      allow read, write: if allowed();
+      allow read: if allowed();
+      allow write: if canWrite();
     }
 
     // Recipient/client roster used by the DNC-Sent dropdown.
     match /config/clients {
-      allow read, write: if allowed();
+      allow read: if allowed();
+      allow write: if canWrite();
     }
 
     // Legacy master list (kept readable so old data can be cleaned up).
     match /master/{doc} {
-      allow read, write: if allowed();
+      allow read: if allowed();
+      allow write: if canWrite();
     }
 
     // Shared batch history (one doc per saved batch: counts, scrub).
     match /batches/{doc} {
-      allow read, write: if allowed();
+      allow read: if allowed();
+      allow write: if canWrite();
     }
 
     // Lead Bank packet index (metadata only; the lead files live in Google Drive).
     match /packets/{doc} {
-      allow read, write: if allowed();
+      allow read: if allowed();
+      allow write: if canWrite();
     }
 
     // Source-upload index (metadata only; the original raw files live in Google Drive).
     match /uploads/{doc} {
-      allow read, write: if allowed();
+      allow read: if allowed();
+      allow write: if canWrite();
     }
 
     // Saved-dataset index (metadata only; the dataset JSON files live in Google Drive).
     match /datasets/{doc} {
-      allow read, write: if allowed();
+      allow read: if allowed();
+      allow write: if canWrite();
     }
 
     // Everything else is denied — every collection above is allowlist-only, so

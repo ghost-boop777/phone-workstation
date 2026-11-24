@@ -27,9 +27,12 @@ const firebaseConfig = {
 const _$ = id => document.getElementById(id);
 function setMsg(t, isErr){ const m=_$('authMsg'); if(m){ m.textContent=t||''; m.classList.toggle('err', !!isErr); } }
 function lock(){ document.documentElement.classList.remove('authed'); }
-function unlock(email){
+function unlock(email, validateOnly){
   document.documentElement.classList.add('authed');
-  const w=_$('authWho'); if(w) w.textContent=email;
+  // validate-only = restricted employee: can scrub/validate, but the UI hides every
+  // import/export/save/modify control and Firestore rules block DNC writes.
+  document.documentElement.classList.toggle('role-validate-only', !!validateOnly);
+  const w=_$('authWho'); if(w) w.textContent = email + (validateOnly ? ' · validate-only' : '');
   if(typeof masterCloudInit==='function') masterCloudInit();   // start shared master-list sync
 }
 
@@ -78,23 +81,30 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 if (auth) auth.onAuthStateChanged(async user => {
-  if (!user) { document.documentElement.classList.remove('is-admin'); lock(); setMsg(''); return; }
+  if (!user) { document.documentElement.classList.remove('is-admin','role-validate-only'); lock(); setMsg(''); return; }
   const email = (user.email || '').toLowerCase();
-  // Founders: always allowed + admin (hardcoded root — works even before any Firestore config exists)
+  // Founders: always allowed + admin, never validate-only (hardcoded root — works even
+  // before any Firestore config exists)
   if (ALLOWED_EMAILS.includes(email)) {
     document.documentElement.classList.add('is-admin');
-    unlock(user.email);
+    unlock(user.email, false);
     return;
   }
   // Otherwise consult the self-serve allowlist stored in Firestore
   try {
     if (firebase.firestore) {
       const snap = await firebase.firestore().doc('config/allowlist').get();
-      const list = (snap.exists ? (snap.data().emails || []) : []).map(e => String(e).toLowerCase());
-      if (list.includes(email)) { document.documentElement.classList.remove('is-admin'); unlock(user.email); return; }
+      const data = snap.exists ? snap.data() : {};
+      const list = (data.emails || []).map(e => String(e).toLowerCase());
+      const validateOnly = (data.validateOnly || []).map(e => String(e).toLowerCase());
+      if (list.includes(email)) {
+        document.documentElement.classList.remove('is-admin');
+        unlock(user.email, validateOnly.includes(email));
+        return;
+      }
     }
   } catch (e) { /* fall through to denial */ }
-  document.documentElement.classList.remove('is-admin');
+  document.documentElement.classList.remove('is-admin','role-validate-only');
   lock();
   setMsg(`${user.email} is not authorized. Ask an admin to add you.`, true);
   auth.signOut();

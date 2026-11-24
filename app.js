@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-07-02i';
-console.log('Phone Workstation build', BUILD, '— Ofcom/quality checks off by default (faster scrubbing on big files)');
+const BUILD = '2026-11-24a';
+console.log('Phone Workstation build', BUILD, '— validate-only employee role (scrub/check only; no import/export/modify)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
@@ -1593,27 +1593,40 @@ async function usersOpen(){
   await usersRender();
 }
 async function usersRender(){
-  let added=[];
-  try{ const snap=await _db.doc('config/allowlist').get(); added=(snap.exists && snap.data().emails)||[]; }catch(_){}
+  let data={};
+  try{ const snap=await _db.doc('config/allowlist').get(); data=(snap.exists && snap.data())||{}; }catch(_){}
+  const added=data.emails||[];
+  const vo=(data.validateOnly||[]).map(e=>String(e).toLowerCase());
   const founders=(typeof ALLOWED_EMAILS!=='undefined'?ALLOWED_EMAILS:[]).map(e=>e.toLowerCase());
   const extra=added.map(e=>String(e).toLowerCase()).filter(e=>!founders.includes(e));
-  const rows=[...founders.map(e=>({email:e,owner:true})), ...extra.map(e=>({email:e,owner:false}))];
-  $('usersList').innerHTML=rows.map(u=>`<li class="user-row"><span>${esc(u.email)}${u.owner?'<span class="user-tag">owner</span>':''}</span>${u.owner?'':`<button class="btn btn-ghost btn-sm" data-remove="${esc(u.email)}">Remove</button>`}</li>`).join('');
+  const rows=[...founders.map(e=>({email:e,owner:true,vo:false})), ...extra.map(e=>({email:e,owner:false,vo:vo.includes(e)}))];
+  $('usersList').innerHTML=rows.map(u=>`<li class="user-row"><span>${esc(u.email)}${u.owner?'<span class="user-tag">owner</span>':(u.vo?'<span class="user-tag">validate-only</span>':'')}</span>${u.owner?'':`<button class="btn btn-ghost btn-sm" data-remove="${esc(u.email)}">Remove</button>`}</li>`).join('');
 }
 async function usersAdd(){
   const email=($('usersAddEmail').value||'').trim().toLowerCase();
   if(!email || email.indexOf('@')<1){ $('usersMsg').textContent='Enter a valid email.'; return; }
+  const vo = !!($('usersValidateOnly') && $('usersValidateOnly').checked);
   $('usersMsg').textContent='Adding…';
   try{
-    await _db.doc('config/allowlist').set({ emails: firebase.firestore.FieldValue.arrayUnion(email) }, {merge:true});
-    $('usersAddEmail').value=''; $('usersMsg').textContent=`Added ${email}. They can sign in now.`;
+    // validate-only users go in BOTH emails (allowed) and validateOnly (restricted);
+    // a full-access add clears any prior validate-only flag for that email.
+    await _db.doc('config/allowlist').set({
+      emails: firebase.firestore.FieldValue.arrayUnion(email),
+      validateOnly: vo ? firebase.firestore.FieldValue.arrayUnion(email)
+                       : firebase.firestore.FieldValue.arrayRemove(email)
+    }, {merge:true});
+    $('usersAddEmail').value=''; if($('usersValidateOnly')) $('usersValidateOnly').checked=false;
+    $('usersMsg').textContent=`Added ${email}${vo?' (validate-only)':''}. They can sign in now.`;
     await usersRender();
   }catch(e){ $('usersMsg').textContent='Could not add (owners only): '+(e.message||e); }
 }
 async function usersRemove(email){
   if(!confirm(`Remove ${email}? They lose access on next sign-in.`)) return;
   try{
-    await _db.doc('config/allowlist').set({ emails: firebase.firestore.FieldValue.arrayRemove(email) }, {merge:true});
+    await _db.doc('config/allowlist').set({
+      emails: firebase.firestore.FieldValue.arrayRemove(email),
+      validateOnly: firebase.firestore.FieldValue.arrayRemove(email)
+    }, {merge:true});
     await usersRender();
   }catch(e){ alert('Could not remove: '+(e.message||e)); }
 }
@@ -1674,6 +1687,8 @@ async function masterLoad(){ masterStatus(); }
 
 // Mark numbers as "already sent" to the SELECTED client (per-client DNC list).
 async function masterAddBulk(e164s){
+  // Validate-only employees can't modify the DNC (also blocked by Firestore rules + hidden UI).
+  if(document.documentElement.classList.contains('role-validate-only')){ alert('Your account is validate-only — you can check numbers against the DNC but not add to it.'); return 0; }
   if(!state.client){ alert('Pick a client first — the DNC-Sent list is stored per client.'); return 0; }
   const fresh=[...new Set(e164s)].filter(e=>e && !masterSet.has(e));
   if(fresh.length && _db){

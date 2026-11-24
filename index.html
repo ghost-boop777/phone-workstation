@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>UK Phone Validation Workstation</title>
-  <link rel="stylesheet" href="style.css?v=20260624b" />
+  <link rel="stylesheet" href="style.css?v=20261124a" />
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/libphonenumber-js@1.11.4/bundle/libphonenumber-max.js"></script>
@@ -13,7 +13,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script src="https://apis.google.com/js/api.js"></script>
-  <script src="auth.js?v=20260702g"></script>
+  <script src="auth.js?v=20261124a"></script>
 </head>
 <body>
 
@@ -94,7 +94,7 @@
             <button id="clientAddBtn" class="btn btn-ghost btn-sm" type="button">Add</button>
           </div>
           <div class="sup-row" style="margin-top:10px">
-            <label class="btn btn-ghost">⬆ Import sent numbers<input type="file" id="masterImport" accept=".csv,.txt,.xls,.xlsx" hidden /></label>
+            <label id="btnMasterImportLabel" class="btn btn-ghost">⬆ Import sent numbers<input type="file" id="masterImport" accept=".csv,.txt,.xls,.xlsx" hidden /></label>
             <button id="btnMasterExport" class="btn btn-ghost">⬇ Export sent (CSV)</button>
             <button id="btnMasterExportTxt" class="btn btn-ghost" title="Plain text list, one number per line — opens cleanly in Notepad">⬇ Export sent (TXT)</button>
             <button id="btnMasterClear" class="btn btn-ghost">🗑 Clear</button>
@@ -395,6 +395,10 @@
       <input id="usersAddEmail" type="email" placeholder="name@gmail.com" class="search-input" />
       <button id="usersAddBtn" class="btn btn-primary">Add</button>
     </div>
+    <label class="opt-row checkbox-row" style="margin-top:8px;font-size:13px">
+      <input type="checkbox" id="usersValidateOnly" />
+      <span>Validate-only (can scrub/check against DNC, but <strong>no import, export, save or modify</strong>)</span>
+    </label>
     <div id="usersMsg" class="live-progress"></div>
     <div class="modal-foot"><span></span><button id="usersDone" class="btn btn-primary">Done</button></div>
   </div>
@@ -443,6 +447,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20260702i"></script>
+<script src="app.js?v=20261124a"></script>
 </body>
 </html>
