@@ -17,7 +17,7 @@ const ALLOWED_EMAILS = [
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDK7wcA-0hujY-Ii09NIvMSPdIulFOFgtc',
-  authDomain: 'phone-workstation.web.app',   // same-origin as the app → sign-in works in incognito / storage-partitioned browsers (fixes "missing initial state")
+  authDomain: 'phone-workstation.firebaseapp.com',   // must match the Google OAuth client's registered redirect URI (web.app is NOT registered → redirect_uri_mismatch). Normal-window sign-in works; incognito needs the web.app redirect URI added in Google Cloud Console first.
   projectId: 'phone-workstation',
   storageBucket: 'phone-workstation.firebasestorage.app',
   messagingSenderId: '437695082938',

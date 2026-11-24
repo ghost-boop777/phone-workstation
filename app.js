@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 'use strict';
 
-const BUILD = '2026-11-24b';
-console.log('Phone Workstation build', BUILD, '— same-domain auth (fixes incognito "missing initial state" sign-in error)');
+const BUILD = '2026-11-24c';
+console.log('Phone Workstation build', BUILD, '— revert authDomain to firebaseapp.com (web.app caused redirect_uri_mismatch)');
 
 const state = {
   files: [], rawRecords: [], records: [], tab: 'landline', query: '',
